@@ -1,0 +1,4 @@
+{"type":"progress","payload":{"code":0,"message":"es10b_retrieve_notifications_list","data":"7"}}
+{"type":"progress","payload":{"code":0,"message":"es9p_handle_notification","data":"7"}}
+{"type":"progress","payload":{"code":0,"message":"es10b_remove_notification_from_list","data":"7"}}
+{"type":"lpa","payload":{"code":0,"message":"success","data":null}}

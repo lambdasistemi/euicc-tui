@@ -1,0 +1,6 @@
+packages: .
+
+tests: True
+
+package euicc-tui
+  flags: +werror

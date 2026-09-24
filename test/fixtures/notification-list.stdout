@@ -1,0 +1,1 @@
+{"type":"lpa","payload":{"code":0,"message":"success","data":[{"seqNumber":7,"profileManagementOperation":"disable","notificationAddress":"rsp.example-mobile.com","iccid":"8944476500001234567"},{"seqNumber":8,"profileManagementOperation":"enable","notificationAddress":"smdp.other-telco.net","iccid":"8939100000000000001"}]}}

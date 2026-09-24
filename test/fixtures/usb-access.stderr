@@ -1,0 +1,3 @@
+SCardListReaders() failed: 8010002E (Unknown error: 0xFFFFFFFF8010002E)
+LIBUSB_ERROR_ACCESS
+APDU driver init failed

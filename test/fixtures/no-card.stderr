@@ -1,0 +1,2 @@
+SCardConnect() failed: 8010000C (Unknown error: 0xFFFFFFFF8010000C)
+APDU driver init failed
