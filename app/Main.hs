@@ -1,4 +1,7 @@
 module Main (main) where
 
+import Euicc.Lpac.Process (processRunner)
+import Euicc.Ui.App (runApp)
+
 main :: IO ()
-main = putStrLn "euicc-tui: terminal UI not wired yet"
+main = processRunner >>= runApp
