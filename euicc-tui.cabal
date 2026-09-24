@@ -59,22 +59,27 @@ library
     Euicc.Lpac.Command
     Euicc.Lpac.Output
     Euicc.Lpac.Process
+    Euicc.Ui.App
     Euicc.Ui.State
 
   build-depends:
-    , aeson          >=2.1    && <2.3
-    , base           >=4.18   && <5
-    , bytestring     >=0.11   && <0.13
-    , text           >=2.0    && <2.2
-    , typed-process  >=0.2.11 && <0.3
-    , vty            >=6.0    && <6.6
+    , aeson              >=2.1    && <2.3
+    , base               >=4.18   && <5
+    , brick              >=2.1    && <2.11
+    , bytestring         >=0.11   && <0.13
+    , text               >=2.0    && <2.2
+    , typed-process      >=0.2.11 && <0.3
+    , vty                >=6.0    && <6.6
+    , vty-crossplatform  >=0.4    && <0.6
 
 executable euicc-tui
   import:         warnings, extensions
   hs-source-dirs: app
   main-is:        Main.hs
   ghc-options:    -threaded -rtsopts
-  build-depends:  base >=4.18 && <5
+  build-depends:
+    , base       >=4.18 && <5
+    , euicc-tui
 
 test-suite unit-tests
   import:             warnings, extensions
