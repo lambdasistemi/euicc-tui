@@ -1,0 +1,2 @@
+SCardEstablishContext() failed: 8010006A (Unknown error: 0xFFFFFFFF8010006A)
+APDU driver init failed

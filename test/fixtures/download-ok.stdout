@@ -1,0 +1,8 @@
+{"type":"progress","payload":{"code":0,"message":"es10b_get_euicc_challenge_and_info","data":"smdp.example.com"}}
+{"type":"progress","payload":{"code":0,"message":"es9p_initiate_authentication","data":null}}
+{"type":"progress","payload":{"code":0,"message":"es10b_authenticate_server","data":null}}
+{"type":"progress","payload":{"code":0,"message":"es9p_authenticate_client","data":null}}
+{"type":"progress","payload":{"code":0,"message":"es10b_prepare_download","data":null}}
+{"type":"progress","payload":{"code":0,"message":"es9p_get_bound_profile_package","data":null}}
+{"type":"progress","payload":{"code":0,"message":"es10b_load_bound_profile_package","data":null}}
+{"type":"lpa","payload":{"code":0,"message":"success","data":{"seqNumber":9}}}

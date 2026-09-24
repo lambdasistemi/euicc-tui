@@ -1,0 +1,86 @@
+cabal-version:      3.0
+name:               euicc-tui
+version:            0.1.0.0
+synopsis:           Terminal UI for eUICC profile management over lpac
+description:
+  A brick terminal UI that drives @lpac@ over PC/SC to list, enable
+  and download eSIM profiles on a removable eUICC card, and to send
+  its pending notifications. It never deletes a profile.
+
+homepage:           https://github.com/lambdasistemi/euicc-tui
+bug-reports:        https://github.com/lambdasistemi/euicc-tui/issues
+license:            Apache-2.0
+license-file:       LICENSE
+author:             Paolo Veronelli
+maintainer:         paolo.veronelli@gmail.com
+copyright:          (c) 2026 Paolo Veronelli
+category:           System
+stability:          experimental
+build-type:         Simple
+extra-doc-files:    README.md
+extra-source-files:
+  test/fixtures/*.stderr
+  test/fixtures/*.stdout
+
+source-repository head
+  type:     git
+  location: https://github.com/lambdasistemi/euicc-tui
+
+flag werror
+  description: Turn warnings into errors
+  default:     False
+  manual:      True
+
+common warnings
+  if flag(werror)
+    ghc-options: -Werror
+
+  ghc-options:
+    -Wall -Wunused-imports -Wunused-packages -Wmissing-export-lists
+    -Wname-shadowing -Wdeferred-out-of-scope-variables
+    -Wpartial-type-signatures -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DerivingStrategies
+    LambdaCase
+    NamedFieldPuns
+    OverloadedStrings
+    RecordWildCards
+    StrictData
+
+library
+  import:          warnings, extensions
+  hs-source-dirs:  src
+  exposed-modules: Euicc.Lpac.Output
+  build-depends:
+    , aeson       >=2.1  && <2.3
+    , base        >=4.18 && <5
+    , bytestring  >=0.11 && <0.13
+    , text        >=2.0  && <2.2
+
+executable euicc-tui
+  import:         warnings, extensions
+  hs-source-dirs: app
+  main-is:        Main.hs
+  ghc-options:    -threaded -rtsopts
+  build-depends:  base >=4.18 && <5
+
+test-suite unit-tests
+  import:             warnings, extensions
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     test
+  main-is:            Main.hs
+  other-modules:
+    Euicc.Lpac.OutputSpec
+    Fixtures
+
+  ghc-options:        -threaded
+  build-tool-depends: hspec-discover:hspec-discover >=2.10 && <2.12
+  build-depends:
+    , base        >=4.18 && <5
+    , bytestring  >=0.11 && <0.13
+    , euicc-tui
+    , hspec       >=2.10 && <2.12
+    , text        >=2.0  && <2.2

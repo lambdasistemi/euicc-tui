@@ -1,0 +1,2 @@
+SCardListReaders() failed: 8010002E (Unknown error: 0xFFFFFFFF8010002E)
+APDU driver init failed
