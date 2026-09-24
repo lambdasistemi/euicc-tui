@@ -59,6 +59,7 @@ library
     Euicc.Lpac.Command
     Euicc.Lpac.Output
     Euicc.Lpac.Process
+    Euicc.Ui.State
 
   build-depends:
     , aeson          >=2.1    && <2.3
@@ -66,6 +67,7 @@ library
     , bytestring     >=0.11   && <0.13
     , text           >=2.0    && <2.2
     , typed-process  >=0.2.11 && <0.3
+    , vty            >=6.0    && <6.6
 
 executable euicc-tui
   import:         warnings, extensions
@@ -84,6 +86,7 @@ test-suite unit-tests
     Euicc.JobSpec
     Euicc.Lpac.CommandSpec
     Euicc.Lpac.OutputSpec
+    Euicc.Ui.StateSpec
     Fixtures
 
   ghc-options:        -threaded
@@ -95,3 +98,4 @@ test-suite unit-tests
     , hspec       >=2.10 && <2.12
     , QuickCheck  >=2.14 && <2.17
     , text        >=2.0  && <2.2
+    , vty         >=6.0  && <6.6
