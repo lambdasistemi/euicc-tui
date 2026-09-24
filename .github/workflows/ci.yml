@@ -11,10 +11,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Builds every derivation once so the jobs below find them in the
+  # shared store.
   build-gate:
     name: Build Gate
     runs-on: nixos
     steps:
       - uses: actions/checkout@v6
-      - name: Stub CI
-        run: echo "CI stub — will be replaced by real CI"
+      - uses: cachix/cachix-action@v17
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build all derivations
+        run: >-
+          nix build --quiet --accept-flake-config
+          .#default
+          .#unit-tests
+          .#checks.x86_64-linux.unit
+          .#devShells.x86_64-linux.default
+
+  build:
+    name: CI build
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v6
+      - name: Flake checks
+        run: nix flake check --quiet --accept-flake-config
+      - name: Unit tests
+        run: nix run --quiet --accept-flake-config .#unit
+
+  dev-shell:
+    name: CI dev shell
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and test inside nix develop
+        run: >-
+          nix develop --quiet --accept-flake-config
+          -c bash -c 'cabal update && just build && just unit'
+
+  formatting:
+    name: CI format
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check formatting
+        run: nix develop --quiet --accept-flake-config -c just format-check
+
+  hlint:
+    name: CI hlint
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run HLint
+        run: nix develop --quiet --accept-flake-config -c just hlint
