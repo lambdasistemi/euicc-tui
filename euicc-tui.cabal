@@ -55,6 +55,7 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Euicc.ActivationCode
+    Euicc.Lpac.Command
     Euicc.Lpac.Output
 
   build-depends:
@@ -77,6 +78,7 @@ test-suite unit-tests
   main-is:            Main.hs
   other-modules:
     Euicc.ActivationCodeSpec
+    Euicc.Lpac.CommandSpec
     Euicc.Lpac.OutputSpec
     Fixtures
 
