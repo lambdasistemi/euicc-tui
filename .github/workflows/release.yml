@@ -79,7 +79,7 @@ jobs:
               ;;
           esac
 
-      - name: Build and smoke-test Linux artifacts
+      - name: Build, smoke-test and install-test Linux artifacts
         id: linux-artifacts
         run: |
           set -euo pipefail
@@ -100,6 +100,9 @@ jobs:
           nix build --quiet --accept-flake-config ".#$package_output"
           artifact_dir="$(readlink -f result)"
           nix run --quiet --accept-flake-config .#linux-artifact-smoke -- \
+            --artifacts-dir "$artifact_dir" \
+            --artifact-version "$artifact_version"
+          nix run --quiet --accept-flake-config .#linux-install-test -- \
             --artifacts-dir "$artifact_dir" \
             --artifact-version "$artifact_version"
 
@@ -136,6 +139,9 @@ jobs:
             echo "Debian and Ubuntu (amd64): \`sudo apt install ./euicc-tui-${TAG#v}-x86_64-linux.deb\`"
             echo "installs pcscd, the CCID reader driver and the PC/SC client library."
             echo "lpac is bundled."
+            echo
+            echo "Fedora (x86_64): \`sudo dnf install ./euicc-tui-${TAG#v}-x86_64-linux.rpm\`"
+            echo "installs pcsc-lite, pcsc-lite-ccid and pcsc-lite-libs; then enable pcscd.socket."
             echo
             echo "Other distributions: \`euicc-tui.AppImage\` (lpac bundled). Install pcscd and"
             echo "the CCID driver (ccid or libccid) from the distribution first. The AppImage needs"

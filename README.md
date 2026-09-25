@@ -53,6 +53,19 @@ euicc-tui
 `lpac` and `zbar` (QR decoding) are bundled; the distribution's own
 `lpac`, if any, is never used.
 
+### Fedora (x86_64)
+
+Download `euicc-tui-<version>-x86_64-linux.rpm` from the same release
+and install it with `dnf`, which also installs `pcsc-lite`, the CCID
+driver (`pcsc-lite-ccid`) and the PC/SC client library
+(`pcsc-lite-libs`); then start the daemon:
+
+```sh
+sudo dnf install ./euicc-tui-<version>-x86_64-linux.rpm
+sudo systemctl enable --now pcscd.socket
+euicc-tui
+```
+
 ### Other distributions (x86_64)
 
 Install `pcscd` and the CCID driver (`ccid` or `libccid`) from the
@@ -85,7 +98,8 @@ Every package wraps `lpac` and `zbar` into the program's `PATH`, and
 every `lpac` call runs with `LPAC_APDU=pcsc`, whatever the caller's
 environment says. The PC/SC client and `pcscd` must speak the same
 protocol version, so when the distribution ships its own client
-library (`libpcsclite.so.1`), the bundled one hands over to it
+library (`libpcsclite_real.so.1`, or `libpcsclite.so.1` before
+pcsc-lite 2.3), the bundled one hands over to it
 (`LIBPCSCLITE_DELEGATE`); on NixOS the bundled one is used.
 
 ## Keys

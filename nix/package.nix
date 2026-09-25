@@ -5,7 +5,9 @@
 # built with. When the distribution ships its own client library, the
 # bundled one delegates to it (LIBPCSCLITE_DELEGATE), so lpac always
 # speaks the local daemon's protocol; elsewhere (NixOS) the bundled one
-# is used.
+# is used. Distributions with pcsc-lite 2.3 or later split the library
+# the same way as the bundled one: the delegate must then be their
+# libpcsclite_real.so.1, as their libpcsclite.so.1 would delegate back.
 { pkgs, exe }:
 pkgs.runCommand "euicc-tui"
   {
@@ -23,9 +25,15 @@ pkgs.runCommand "euicc-tui"
       } \
       --run '
         if [ -z "''${LIBPCSCLITE_DELEGATE:-}" ]; then
-          for lib in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib; do
-            if [ -e "$lib/libpcsclite.so.1" ]; then
-              export LIBPCSCLITE_DELEGATE="$lib/libpcsclite.so.1"
+          for lib in \
+            /usr/lib/x86_64-linux-gnu/libpcsclite_real.so.1 \
+            /usr/lib64/libpcsclite_real.so.1 \
+            /usr/lib/libpcsclite_real.so.1 \
+            /usr/lib/x86_64-linux-gnu/libpcsclite.so.1 \
+            /usr/lib64/libpcsclite.so.1 \
+            /usr/lib/libpcsclite.so.1; do
+            if [ -e "$lib" ]; then
+              export LIBPCSCLITE_DELEGATE="$lib"
               break
             fi
           done

@@ -67,6 +67,7 @@
           linux-release-artifacts = linuxRelease packageVersion;
           linux-dev-release-artifacts = linuxRelease "${packageVersion}-${sourceRevision}";
           linux-artifact-smoke = import ./nix/linux-artifact-smoke.nix { inherit pkgs system; };
+          linux-install-test = import ./nix/linux-install-test.nix { inherit pkgs system; };
         };
         checks = builtins.removeAttrs checks [ "apps" ] // {
           inherit euicc-tui;

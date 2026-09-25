@@ -31,6 +31,9 @@ jobs:
           .#unit-tests
           .#checks.x86_64-linux.unit
           .#devShells.x86_64-linux.default
+          .#linux-release-artifacts
+      - name: Release version contract
+        run: scripts/release/check-version-consistency
 
   build:
     name: CI build
@@ -71,3 +74,30 @@ jobs:
       - uses: actions/checkout@v6
       - name: Run HLint
         run: nix develop --quiet --accept-flake-config -c just hlint
+
+  linux-packages:
+    name: CI Linux packages
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/cachix-action@v17
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build Linux release artifacts
+        id: build
+        run: |
+          out="$(nix build --quiet --accept-flake-config --print-out-paths .#linux-release-artifacts)"
+          echo "out=$out" >>"$GITHUB_OUTPUT"
+          echo "version=$(scripts/release/get-cabal-version)" >>"$GITHUB_OUTPUT"
+      - name: Smoke the extracted .deb, .rpm and AppImage
+        run: >-
+          nix run --quiet --accept-flake-config .#linux-artifact-smoke --
+          --artifacts-dir "${{ steps.build.outputs.out }}"
+          --artifact-version "${{ steps.build.outputs.version }}"
+      - name: Install on Ubuntu, Debian and Fedora
+        run: >-
+          nix run --quiet --accept-flake-config .#linux-install-test --
+          --artifacts-dir "${{ steps.build.outputs.out }}"
+          --artifact-version "${{ steps.build.outputs.version }}"
