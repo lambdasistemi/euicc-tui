@@ -50,7 +50,9 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 Press `?` for the keys of the current screen.
 
 The colours follow the terminal's background, light or dark, as the
-terminal reports it; `EUICC_TUI_THEME=light` or `dark` overrides.
+terminal reports it at start. Terminals that report light/dark changes
+(DEC mode 2031, e.g. Ghostty) are followed live; `t` swaps by hand in
+any terminal. `EUICC_TUI_THEME=light` or `dark` fixes the theme.
 
 The mouse works too: a click selects a row, a tab or a picker entry;
 a click on the selected profile asks to enable it, and on the selected
@@ -62,7 +64,7 @@ With mouse mode on, most terminals select text with shift+drag.
 
 | View | Keys |
 |---|---|
-| Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `D` delete, `r` refresh, `q` quit |
+| Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `D` delete, `r` refresh, `t` light/dark, `q` quit |
 | Delete | type the last four ICCID digits, enter deletes if they match (anything else cancels), esc cancel |
 | Confirmation | `y` enable, `n`/esc cancel |
 | Nickname | type, enter set, esc cancel |

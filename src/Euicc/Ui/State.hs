@@ -68,6 +68,7 @@ import Euicc.Lpac.Output
     , describeFailure
     , profileLabel
     )
+import Euicc.Ui.Theme (Theme (..))
 import Graphics.Vty (Key (..), Modifier (..))
 import System.FilePath (takeDirectory, (</>))
 
@@ -184,6 +185,8 @@ data State = State
     , stBusy :: Maybe Job
     -- ^ the job in flight
     , stStatus :: Maybe Status
+    , stTheme :: Theme
+    -- ^ light or dark; @t@ toggles it
     }
     deriving stock (Eq, Show)
 
@@ -212,9 +215,14 @@ start =
         , stHelp = False
         , stBusy = Just Refresh
         , stStatus = Nothing
+        , stTheme = Dark
         }
     , Refresh
     )
+
+-- | Swap the light and dark themes.
+toggleTheme :: State -> State
+toggleTheme s = s{stTheme = if stTheme s == Dark then Light else Dark}
 
 -- | React to a key press.
 handleKey :: Key -> [Modifier] -> State -> Step
@@ -313,6 +321,7 @@ handleKey key mods s
         KChar 'e' -> askEnable
         KEnter -> askEnable
         KChar 'r' -> launch Refresh s
+        KChar 't' -> continue $ toggleTheme s
         KChar 'n' -> switchTo NotificationsView
         KChar 'd' -> switchTo DownloadView
         KChar 'g' -> openWizard
@@ -341,6 +350,7 @@ handleKey key mods s
             [] -> continue s{stStatus = Just $ Info "Nothing to send."}
             seqs -> launch (SendNotifications seqs) s
         KChar 'r' -> launch Refresh s
+        KChar 't' -> continue $ toggleTheme s
         KChar 'p' -> continue s{stView = ProfilesView}
         KEsc -> continue s{stView = ProfilesView}
         KChar 'd' -> switchTo DownloadView

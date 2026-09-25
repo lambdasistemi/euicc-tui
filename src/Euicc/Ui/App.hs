@@ -31,6 +31,7 @@ import Brick
     , hBox
     , hLimit
     , halt
+    , modify
     , neverShowCursor
     , on
     , overrideAttr
@@ -55,6 +56,7 @@ import Brick.Widgets.Dialog (dialog, dialogAttr, renderDialog)
 import Control.Concurrent (forkIO)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
+import Data.ByteString qualified as B
 import Data.Char (toLower, toUpper)
 import Data.Foldable (traverse_)
 import Data.List (find)
@@ -98,10 +100,18 @@ import Euicc.Ui.State
     , start
     , typing
     )
-import Euicc.Ui.Theme (Theme (..), detectTheme)
+import Euicc.Ui.Theme
+    ( Theme (..)
+    , detectTheme
+    , followChanges
+    , reportedTheme
+    , stopFollowing
+    , themeReports
+    )
 import Graphics.Vty qualified as V
 import Graphics.Vty.CrossPlatform (mkVty)
 import System.FilePath (takeExtension)
+import System.IO (hFlush, stdout)
 
 -- | A job finished on the worker thread.
 newtype AppEvent = JobDone JobResult
@@ -123,33 +133,48 @@ runApp runner = do
     let launch job =
             void $ forkIO $ runJob runner job >>= writeBChan chan . JobDone
         (s0, j0) = start
-    theme <- detectTheme
+    (theme, follow) <- detectTheme
     launch j0
-    let buildVty = mkVty V.defaultConfig
+    let buildVty =
+            mkVty
+                V.defaultConfig
+                    { V.configInputMap = [r | follow, r <- themeReports]
+                    }
     vty <- buildVty
-    void $ customMain vty buildVty (Just chan) (app theme launch) s0
+    void $
+        customMain
+            vty
+            buildVty
+            (Just chan)
+            (app follow launch)
+            s0{stTheme = theme}
+    when follow $ B.putStr stopFollowing >> hFlush stdout
 
-app :: Theme -> (Job -> IO ()) -> App State AppEvent Name
-app theme launch =
+app :: Bool -> (Job -> IO ()) -> App State AppEvent Name
+app follow launch =
     App
         { appDraw = draw
         , appChooseCursor = neverShowCursor
         , appHandleEvent = handleEvent launch
-        , appStartEvent = enableMouse
-        , appAttrMap = const $ attributes theme
+        , appStartEvent = setupTerminal follow
+        , appAttrMap = attributes . stTheme
         }
 
--- | Ask the terminal for mouse events, when it can report them.
-enableMouse :: EventM Name State ()
-enableMouse = do
+{- | Ask the terminal for mouse events, when it can report them, and
+for light/dark changes, when following them.
+-}
+setupTerminal :: Bool -> EventM Name State ()
+setupTerminal follow = do
     output <- V.outputIface <$> getVtyHandle
-    when (V.supportsMode output V.Mouse)
-        $ liftIO
-        $ V.setMode output V.Mouse True
+    liftIO $ do
+        when (V.supportsMode output V.Mouse) $ V.setMode output V.Mouse True
+        when follow $ V.outputByteBuffer output followChanges
 
 handleEvent
     :: (Job -> IO ()) -> BrickEvent Name AppEvent -> EventM Name State ()
 handleEvent launch = \case
+    VtyEvent e
+        | Just t <- reportedTheme e -> modify $ \s -> s{stTheme = t}
     VtyEvent (V.EvKey key mods) -> step $ handleKey key mods
     MouseDown name button _ _ -> case clickOf name button of
         Just c -> step $ handleClick c
@@ -236,7 +261,6 @@ attributes theme =
         [ (columnAttr, V.defAttr `V.withStyle` V.bold)
         , (titleAttr, V.defAttr `V.withStyle` V.bold)
         , (dangerBorderAttr, fg V.red)
-        , (infoAttr, fg V.cyan)
         ]
             <> case theme of
                 Light -> light
@@ -247,24 +271,25 @@ attributes theme =
     bold a = a `V.withStyle` V.bold
     light =
         [ (barAttr, rgb 0x26 0x32 0x3f `on` rgb 0xe1 0xe8 0xf0)
-        , (tabAttr, fg V.brightBlack)
-        , (tabActiveAttr, bold (V.black `on` rgb 0xaf 0xff 0xff))
-        , (plainAttr, V.black `on` rgb 0xff 0xff 0xff)
-        , (stripeAttr, V.black `on` rgb 0xff 0xff 0xd7)
-        , (selectedAttr, bold (V.black `on` rgb 0xaf 0xff 0xff))
-        , (dimAttr, fg $ rgb 0x5f 0x5f 0x5f)
-        , (keyAttr, bold $ fg V.blue)
-        , (buttonAttr, V.black `on` rgb 0xaf 0xd7 0xff)
-        , (buttonKeyAttr, bold $ fg V.blue)
-        , (dialogAttr, V.black `on` rgb 0xee 0xee 0xee)
-        , (borderAttr, fg V.brightBlack)
-        , (focusLabelAttr, bold $ fg V.blue)
-        , (dangerAttr, bold $ fg V.red)
-        , (inputAttr, V.black `on` rgb 0xd0 0xd0 0xd0)
-        , (inputFocusAttr, V.black `on` V.white)
-        , (dirAttr, bold $ fg V.blue)
-        , (failureAttr, bold $ fg V.red)
-        , (busyAttr, bold $ fg V.yellow)
+        , (tabAttr, fg $ rgb 0x6a 0x6a 0x6a)
+        , (tabActiveAttr, bold $ rgb 0x0b 0x2a 0x40 `on` rgb 0xcf 0xe3 0xf3)
+        , (plainAttr, V.defAttr)
+        , (stripeAttr, V.defAttr `V.withBackColor` rgb 0xf4 0xf5 0xf7)
+        , (selectedAttr, bold $ rgb 0x0b 0x2a 0x40 `on` rgb 0xcf 0xe3 0xf3)
+        , (dimAttr, fg $ rgb 0x6a 0x6a 0x6a)
+        , (keyAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (buttonAttr, rgb 0x0b 0x2a 0x40 `on` rgb 0xdb 0xe8 0xf5)
+        , (buttonKeyAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (dialogAttr, rgb 0x1c 0x1c 0x1c `on` rgb 0xf2 0xf2 0xf4)
+        , (borderAttr, fg $ rgb 0xa0 0xa0 0xa8)
+        , (focusLabelAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (dangerAttr, bold $ fg $ rgb 0xc0 0x1c 0x28)
+        , (inputAttr, rgb 0x1c 0x1c 0x1c `on` rgb 0xe2 0xe2 0xe6)
+        , (inputFocusAttr, rgb 0x00 0x00 0x00 `on` rgb 0xff 0xff 0xff)
+        , (dirAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (failureAttr, bold $ fg $ rgb 0xc0 0x1c 0x28)
+        , (infoAttr, fg $ rgb 0x0e 0x6e 0x8a)
+        , (busyAttr, bold $ fg $ rgb 0x9a 0x67 0x00)
         ]
     dark =
         [ (barAttr, rgb 0xd0 0xd8 0xe0 `on` rgb 0x26 0x2e 0x38)
@@ -286,6 +311,7 @@ attributes theme =
         , (dirAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
         , (failureAttr, bold $ fg V.brightRed)
         , (busyAttr, bold $ fg V.brightYellow)
+        , (infoAttr, fg V.cyan)
         ]
 
 -- Layout -----------------------------------------------------------
@@ -687,6 +713,7 @@ keysFor s
             , ("D", "delete it (disabled profiles only)")
             , ("n", "pending notifications")
             , ("r", "read the card again")
+            , ("t", "light or dark colours")
             , ("q", "quit")
             ]
         NotificationsView ->
@@ -695,6 +722,7 @@ keysFor s
             , ("a", "send them all")
             , ("p  esc", "back to the profiles")
             , ("r", "read the card again")
+            , ("t", "light or dark colours")
             , ("q", "quit")
             ]
         _ ->

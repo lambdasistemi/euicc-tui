@@ -39,6 +39,7 @@ import Euicc.Ui.State
     , smdpDisplay
     , start
     )
+import Euicc.Ui.Theme (Theme (..))
 import Fixtures (fixtureOk)
 import Graphics.Vty (Key (..))
 import Test.Hspec
@@ -274,6 +275,18 @@ spec = do
             let (s1, _) = pressAll [KChar 'd', KChar '?'] s0
             stHelp s1 `shouldBe` True
             formSmdp (stForm s1) `shouldBe` ""
+    describe "theme" $ do
+        it "toggles on t in the profile list" $ do
+            s0 <- loaded
+            let (s1, j) = press (KChar 't') s0
+            j `shouldBe` Nothing
+            stTheme s1 `shouldBe` Light
+            stTheme (fst $ press (KChar 't') s1) `shouldBe` Dark
+        it "types t as text in a form" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'd', KChar 't'] s0
+            stTheme s1 `shouldBe` stTheme s0
+            formSmdp (stForm s1) `shouldBe` "t"
     describe "mouse" $ do
         let click c s = case handleClick c s of
                 Continue s' j -> (s', j)

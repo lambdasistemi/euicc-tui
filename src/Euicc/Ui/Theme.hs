@@ -2,6 +2,10 @@ module Euicc.Ui.Theme
     ( Theme (..)
     , detectTheme
     , themeOfBackground
+    , followChanges
+    , stopFollowing
+    , themeReports
+    , reportedTheme
     ) where
 
 -- \|
@@ -21,6 +25,7 @@ import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as BC
 import Data.Char (isHexDigit, toLower)
 import Data.Either (fromRight)
+import Graphics.Vty (Event (..), Key (..))
 import Numeric (readHex)
 import System.Environment (lookupEnv)
 import System.Posix.IO
@@ -45,19 +50,22 @@ import System.Posix.Types (Fd)
 data Theme = Light | Dark
     deriving stock (Eq, Show)
 
--- | The theme to draw with.
-detectTheme :: IO Theme
+{- | The theme to draw with, and whether to follow the terminal's
+changes: not when @EUICC_TUI_THEME@ forces one.
+-}
+detectTheme :: IO (Theme, Bool)
 detectTheme = do
     forced <- lookupEnv "EUICC_TUI_THEME"
     case map toLower <$> forced of
-        Just "light" -> pure Light
-        Just "dark" -> pure Dark
-        _ -> do
-            answer <- try @IOException askBackground
-            pure $ case answer of
-                Right reply
-                    | Just t <- themeOfBackground reply -> t
-                _ -> Dark
+        Just "light" -> pure (Light, False)
+        Just "dark" -> pure (Dark, False)
+        _ ->
+            (,True) <$> do
+                answer <- try @IOException askBackground
+                pure $ case answer of
+                    Right reply
+                        | Just t <- themeOfBackground reply -> t
+                    _ -> Dark
   where
     askBackground :: IO ByteString
     askBackground =
@@ -104,3 +112,29 @@ themeOfBackground reply = case B.breakSubstring "rgb:" reply of
         ds -> case readHex ds of
             [(v, "")] -> Just $ fromInteger v / (16 ^ length ds - 1)
             _ -> Nothing
+
+{- | Ask the terminal to report light/dark changes (DEC mode 2031),
+and the current one. Terminals without the mode ignore both.
+-}
+followChanges :: ByteString
+followChanges = "\ESC[?2031h\ESC[?996n"
+
+-- | Stop the reports.
+stopFollowing :: ByteString
+stopFollowing = "\ESC[?2031l"
+
+{- | The reports, as input the terminal layer turns into events: the
+function keys 9971 (dark) and 9972 (light), which no keyboard has.
+-}
+themeReports :: [(Maybe String, String, Event)]
+themeReports =
+    [ (Nothing, "\ESC[?997;1n", EvKey (KFun 9971) [])
+    , (Nothing, "\ESC[?997;2n", EvKey (KFun 9972) [])
+    ]
+
+-- | The theme a report event announces.
+reportedTheme :: Event -> Maybe Theme
+reportedTheme = \case
+    EvKey (KFun 9971) [] -> Just Dark
+    EvKey (KFun 9972) [] -> Just Light
+    _ -> Nothing
