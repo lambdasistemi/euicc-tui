@@ -22,7 +22,8 @@ import Euicc.Lpac.Output
     , parseProfiles
     )
 import Euicc.Ui.State
-    ( Field (..)
+    ( Browser (..)
+    , Field (..)
     , Form (..)
     , State (..)
     , Status (..)
@@ -93,6 +94,25 @@ snapshotWithNew = do
                         }
                 [] -> error "fixture profile list is too short"
     pure snap{snapProfiles = snapProfiles snap <> [newProfile]}
+
+-- | The wizard with a listing loaded, cursor on the first entry.
+atListing :: IO State
+atListing = do
+    s0 <- loaded
+    let (s1, _) = pressAll [KChar 'g', KEnter] s0
+        result =
+            JobResult
+                { resultJob = ReadDir "."
+                , resultOutcome = Right "Directory read."
+                , resultSnapshot = Nothing
+                , resultQr = Nothing
+                , resultDir =
+                    Just
+                        ( "/home/op"
+                        , [(True, "Downloads"), (False, "cuniq.png")]
+                        )
+                }
+    pure $ apply result s1
 
 -- | Keys that submit a plain activation code in the wizard.
 submitKeys :: [Key]
@@ -563,6 +583,58 @@ spec = do
             let (s1, js) = pressAll [KDown, KChar 'm', KEsc] s0
             js `shouldBe` []
             stNicknameEdit s1 `shouldBe` Nothing
+    describe "QR picker" $ do
+        it "opens on Enter over an empty QR field" $ do
+            s0 <- loaded
+            let (s1, js) = pressAll [KChar 'g', KEnter] s0
+            js `shouldBe` [ReadDir "."]
+            stBrowser s1 `shouldSatisfy` (/= Nothing)
+        it "fills from a finished listing" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'g', KEnter] s0
+                s2 =
+                    apply
+                        JobResult
+                            { resultJob = ReadDir "."
+                            , resultOutcome = Right "Directory read."
+                            , resultSnapshot = Nothing
+                            , resultQr = Nothing
+                            , resultDir =
+                                Just
+                                    ( "/home/op"
+                                    , [(True, "Downloads"), (False, "cuniq.png")]
+                                    )
+                            }
+                        s1
+            stBrowser s2
+                `shouldBe` Just
+                    (Browser "/home/op" [(True, "Downloads"), (False, "cuniq.png")] 0)
+        it "moves the cursor within the listing" $ do
+            s1 <- atListing
+            let (s2, _) = pressAll [KDown, KDown, KDown] s1
+            brCursor <$> stBrowser s2 `shouldBe` Just 1
+            let (s3, _) = pressAll [KUp] s2
+            brCursor <$> stBrowser s3 `shouldBe` Just 0
+        it "picks a file: fills the path and starts the read" $ do
+            s1 <- atListing
+            let (s2, js) = pressAll [KDown, KEnter] s1
+            js `shouldBe` [DecodeQr "/home/op/cuniq.png"]
+            stBrowser s2 `shouldBe` Nothing
+            formQr (stForm s2) `shouldBe` "/home/op/cuniq.png"
+        it "descends into a directory" $ do
+            s1 <- atListing
+            let (_, js) = pressAll [KEnter] s1
+            js `shouldBe` [ReadDir "/home/op/Downloads"]
+        it "goes to the parent on backspace" $ do
+            s1 <- atListing
+            let (_, js) = pressAll [KBS] s1
+            js `shouldBe` [ReadDir "/home"]
+        it "cancels on Esc" $ do
+            s1 <- atListing
+            let (s2, js) = pressAll [KEsc] s1
+            js `shouldBe` []
+            stBrowser s2 `shouldBe` Nothing
+            stView s2 `shouldBe` WizardView
     describe "download form" $ do
         it "downloads from typed address and code" $ do
             s0 <- loaded
@@ -660,6 +732,7 @@ spec = do
                                 Download _ _ -> k == KEnter
                                 DecodeQr _ -> k == KEnter
                                 Nickname _ _ -> k == KEnter
+                                ReadDir _ -> k == KEnter || k == KBS
                                 _ -> True
                         in  snd $ foldl' step (s0, True) ks
   where

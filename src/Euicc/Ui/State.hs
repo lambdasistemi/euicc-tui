@@ -7,6 +7,7 @@ module Euicc.Ui.State
     , Status (..)
     , Wizard (..)
     , WizardPhase (..)
+    , Browser (..)
     , confirmDisplay
     , emptyForm
 
@@ -63,6 +64,7 @@ import Euicc.Lpac.Output
     , profileLabel
     )
 import Graphics.Vty (Key (..), Modifier (..))
+import System.FilePath (takeDirectory, (</>))
 
 -- | Which screen is shown.
 data View
@@ -143,6 +145,15 @@ data Wizard = Wizard
     }
     deriving stock (Eq, Show)
 
+-- | A directory listing being browsed for a QR image.
+data Browser = Browser
+    { brCwd :: FilePath
+    , brItems :: [(Bool, Text)]
+    -- ^ each entry: is it a directory, and its name
+    , brCursor :: Int
+    }
+    deriving stock (Eq, Show)
+
 -- | The whole UI state.
 data State = State
     { stView :: View
@@ -157,6 +168,8 @@ data State = State
     -- ^ a profile waiting for a nickname to be typed
     , stWizard :: Maybe Wizard
     -- ^ a guided install in progress
+    , stBrowser :: Maybe Browser
+    -- ^ a directory listing being picked from
     , stBusy :: Maybe Job
     -- ^ the job in flight
     , stStatus :: Maybe Status
@@ -183,6 +196,7 @@ start =
         , stConfirm = Nothing
         , stNicknameEdit = Nothing
         , stWizard = Nothing
+        , stBrowser = Nothing
         , stBusy = Just Refresh
         , stStatus = Nothing
         }
@@ -193,6 +207,7 @@ start =
 handleKey :: Key -> [Modifier] -> State -> Step
 handleKey key mods s
     | key == KChar 'c' && MCtrl `elem` mods = Halt
+    | Just b <- stBrowser s = browsing b
     | Just (p, t) <- stNicknameEdit s = nicknaming p t
     | Just p <- stConfirm s = confirming p
     | otherwise = case stView s of
@@ -202,6 +217,35 @@ handleKey key mods s
         WizardView -> wizard
   where
     continue s' = Continue s' Nothing
+    browsing b = case key of
+        KUp -> continue $ moveBrowser (-1)
+        KChar 'k' -> continue $ moveBrowser (-1)
+        KDown -> continue $ moveBrowser 1
+        KChar 'j' -> continue $ moveBrowser 1
+        KBS -> launch (ReadDir $ takeDirectory $ brCwd b) s
+        KEsc -> continue s{stBrowser = Nothing}
+        KEnter -> case drop (brCursor b) $ brItems b of
+            (isDir, name) : _
+                | isDir ->
+                    launch (ReadDir $ brCwd b </> T.unpack name) s
+                | otherwise ->
+                    launch
+                        (DecodeQr path)
+                        s
+                            { stBrowser = Nothing
+                            , stForm = (stForm s){formQr = T.pack path}
+                            }
+              where
+                path = brCwd b </> T.unpack name
+            [] -> continue s
+        _ -> continue s
+      where
+        moveBrowser d =
+            s
+                { stBrowser =
+                    (\br -> br{brCursor = clamp (length $ brItems br) $ brCursor br + d})
+                        <$> stBrowser s
+                }
     nicknaming p t = case key of
         KEnter
             | T.null (T.strip t) -> cancelNickname
@@ -346,7 +390,9 @@ handleKey key mods s
     formEnter = case formFocus $ stForm s of
         QrField
             | T.null (T.strip $ formQr $ stForm s) ->
-                continue $ onForm $ focus SmdpField
+                launch
+                    (ReadDir ".")
+                    s{stBrowser = Just $ Browser "" [] 0}
             | otherwise ->
                 launch
                     (DecodeQr $ T.unpack $ T.strip $ formQr $ stForm s)
@@ -481,9 +527,13 @@ install when there is one.
 -}
 finishJob :: JobResult -> State -> (State, Maybe Job)
 finishJob JobResult{..} s =
-    let filled = case resultQr of
+    let filled0 = case resultQr of
             Just target -> fillFrom target s
             Nothing -> s
+        filled = case (resultDir, stBrowser filled0) of
+            (Just (cwd, items), Just _) ->
+                filled0{stBrowser = Just $ Browser cwd items 0}
+            _ -> filled0
         s1 =
             filled
                 { stBusy = Nothing

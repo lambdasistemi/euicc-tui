@@ -28,8 +28,9 @@ import System.FilePath ((</>))
 -- | One entry of a listing: is it a directory, and its name.
 type DirEntry = (Bool, Text)
 
--- | The entries of a directory, sorted by name, without dotfiles.
--- A missing or unreadable directory is a failure with the reason.
+{- | The entries of a directory, sorted by name, without dotfiles.
+A missing or unreadable directory is a failure with the reason.
+-}
 listDir :: FilePath -> IO (Either LpacFailure (FilePath, [DirEntry]))
 listDir path = do
     r <- try $ listDirectory path
@@ -42,12 +43,11 @@ listDir path = do
                 $ "cannot list " <> path <> ": " <> show e
         Right names -> do
             entries <- mapM classify names
-            pure
-                $ Right
+            pure $
+                Right
                     ( path
                     , sortOn snd $ filter (not . isDot . snd) entries
                     )
   where
-    classify name =
-        (, T.pack name) <$> doesDirectoryExist (path </> name)
-    isDot name = T.isPrefixOf "." name
+    classify name = (,T.pack name) <$> doesDirectoryExist (path </> name)
+    isDot = T.isPrefixOf "."

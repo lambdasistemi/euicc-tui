@@ -1,6 +1,7 @@
 module Euicc.JobSpec (spec) where
 
 import Data.IORef (modifyIORef, newIORef, readIORef)
+import Data.List (sort)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Euicc.ActivationCode (DownloadTarget (..), mkSecret)
@@ -23,7 +24,6 @@ import Euicc.Lpac.Output
     )
 import Fixtures (fixture, fixtureOk)
 import System.Exit (ExitCode (..))
-import Data.List (sort)
 import Test.Hspec
     ( Spec
     , describe

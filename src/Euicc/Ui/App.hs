@@ -68,7 +68,8 @@ import Euicc.Lpac.Output
     , profileLabel
     )
 import Euicc.Ui.State
-    ( Field (..)
+    ( Browser (..)
+    , Field (..)
     , Form (..)
     , State (..)
     , Status (..)
@@ -151,7 +152,7 @@ attributes =
 -- Drawing ----------------------------------------------------------
 
 draw :: State -> [Widget ()]
-draw s = [confirmLayer s, mainLayer s]
+draw s = [browserLayer s, confirmLayer s, mainLayer s]
 
 mainLayer :: State -> Widget ()
 mainLayer s =
@@ -380,6 +381,31 @@ helpLine s = padLeftRight 1 $ str $ case stView s of
         WzConfirm -> "type the code  enter confirm  esc cancel install"
         WzNickname -> "type a nickname  enter accept  esc skip"
         WzDone -> "esc back to the profiles"
+
+browserLayer :: State -> Widget ()
+browserLayer s = case stBrowser s of
+    Nothing -> emptyWidget
+    Just br@Browser{..} ->
+        centerLayer
+            $ borderWithLabel (txt $ T.pack $ " Pick the QR image — " <> brCwd)
+            $ padLeftRight 2
+            $ vBox
+            $ [txt " "]
+                <> [ rowOf br i entry
+                   | (i, entry) <- zip [0 :: Int ..] brItems
+                   ]
+                <> [ txt " "
+                   , txt
+                        "enter pick or enter a directory, \
+                        \backspace up, esc cancel"
+                   , txt " "
+                   ]
+  where
+    rowOf Browser{brCursor = cursor} i (isDir, name) =
+        highlight (i == cursor)
+            $ txt
+            $ (if i == cursor then "> " else "  ")
+                <> (if isDir then name <> "/" else name)
 
 confirmLayer :: State -> Widget ()
 confirmLayer s = case stConfirm s of

@@ -14,8 +14,10 @@ so profiles can be inspected and switched without remembering ICCIDs.
   or all of them.
 - **Download** a profile from an SM-DP+ address and activation code.
   A full `LPA:1$<smdp>$<code>` string can be pasted into either
-  field, or read from a **QR image file** (a screenshot or the image
-  saved from the purchase email) in the first field. The code is
+  field, or picked as a **QR image file** (a screenshot or the image
+  saved from the purchase email) with a cursor-driven picker over
+  the filesystem: Enter on the empty QR path field opens it,
+  Enter picks the image and the decode starts. The code is
   masked on screen.
 - **Guided install** (`g`): read the purchase QR, download, name the
   plan, enable it after a y/n, send the pending notifications, and
@@ -50,7 +52,8 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 | Confirmation | `y` enable, `n`/esc cancel |
 | Nickname | type, enter set, esc cancel |
 | Notifications | up/down select, `s` send selected, `a` send all, `p`/esc back, `r` refresh, `q` quit |
-| Download | tab switch field, enter on the QR path reads the image, enter on the code downloads, esc cancel (clears the code) |
+| Download | tab switch field, enter on an empty QR path opens the file picker, enter on the code downloads, esc cancel (clears the code) |
+| File picker | up/down (or j/k) select, enter picks the file or enters a directory, backspace parent, esc cancel |
 | Guided install | as download, then: confirmation code enter submits, nickname enter accepts (empty skips), y/n enable, esc on the closing screen returns |
 
 While an `lpac` call runs, the status line says so and new actions are
