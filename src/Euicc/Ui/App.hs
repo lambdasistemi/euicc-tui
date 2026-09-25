@@ -248,7 +248,7 @@ attributes =
         , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
         , (dimAttr, fg $ V.rgbColor (0x5f :: Int) 0x5f 0x5f)
         , (keyAttr, fg V.blue `V.withStyle` V.bold)
-        , (buttonAttr, V.black `on` V.rgbColor (0xc6 :: Int) 0xdb 0xf0)
+        , (buttonAttr, V.black `on` V.rgbColor (0xaf :: Int) 0xd7 0xff)
         , (buttonKeyAttr, fg V.blue `V.withStyle` V.bold)
         , (dialogAttr, V.black `on` V.rgbColor (0xee :: Int) 0xee 0xee)
         , (borderAttr, fg V.brightBlack)
@@ -609,8 +609,16 @@ hints = hBox . zipWith hint [0 :: Int ..]
     hint i (k, d) =
         hBox
             [ txt $ if i == 0 then "" else "   "
-            , maybe id (clickable . KeyButton) (keyOf k) $
-                hBox [withAttr keyAttr $ txt k, txt $ " " <> d]
+            , case keyOf k of
+                Just key ->
+                    clickable (KeyButton key)
+                        $ withAttr buttonAttr
+                        $ hBox
+                            [ txt " "
+                            , withAttr buttonKeyAttr $ txt k
+                            , txt $ " " <> d <> " "
+                            ]
+                Nothing -> hBox [withAttr keyAttr $ txt k, txt $ " " <> d]
             ]
 
 -- | The key a hint names, if it names one.
