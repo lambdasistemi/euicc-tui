@@ -88,6 +88,8 @@ data Form = Form
     , formSmdp :: Text
     , formCode :: Text
     , formFocus :: Field
+    , formConfirmation :: Bool
+    -- ^ the QR code read into the form asks for a confirmation code
     }
     deriving stock (Eq)
 
@@ -100,6 +102,8 @@ instance Show Form where
             <> show (smdpDisplay form)
             <> ", formCode = <redacted>, formFocus = "
             <> show formFocus
+            <> ", formConfirmation = "
+            <> show (formConfirmation form)
             <> "}"
 
 -- | A form with nothing typed.
@@ -110,6 +114,7 @@ emptyForm =
         , formSmdp = ""
         , formCode = ""
         , formFocus = SmdpField
+        , formConfirmation = False
         }
 
 -- | The message line.
@@ -122,12 +127,10 @@ data Status
 data WizardPhase
     = -- | QR image path, SM-DP+ address and activation code
       WzSource
+    | -- | the QR code was read; Enter installs what it holds
+      WzReady
     | -- | the activation code asks for a confirmation code
       WzConfirm
-    | -- | optional nickname for the plan just downloaded
-      WzNickname
-    | -- | closing instruction, everything worked
-      WzDone
     deriving stock (Eq, Show)
 
 -- | The state of a guided install.
@@ -137,9 +140,6 @@ data Wizard = Wizard
     {- ^ the profiles that existed before the download; the new plan
     is the one that appears besides them
     -}
-    , wzNew :: Maybe Profile
-    -- ^ the plan the wizard just downloaded
-    , wzNicknameInput :: Text
     , wzConfirmInput :: Text
     -- ^ the confirmation code while it is typed; cleared on submit
     }
@@ -334,6 +334,10 @@ handleKey key mods s
             KChar c -> continue $ onForm $ editField (`T.snoc` c)
             KEnter -> formEnter
             _ -> continue s
+        WzReady -> case key of
+            KEsc -> closeWizard s
+            KEnter -> submit
+            _ -> continue s
         WzConfirm -> case key of
             KEsc -> closeWizard s
             KBS -> continue s{stWizard = editConfirm <$> stWizard s}
@@ -344,9 +348,10 @@ handleKey key mods s
                     continue
                         s{stStatus = Just $ Info "Type the confirmation code."}
                 | otherwise ->
-                    case resolveDownloadInput
-                        (formSmdp $ stForm s)
-                        (formCode $ stForm s) of
+                    case confirmed (formConfirmation $ stForm s)
+                        <$> resolveDownloadInput
+                            (formSmdp $ stForm s)
+                            (formCode $ stForm s) of
                         Left err -> continue s{stStatus = Just $ Failure err}
                         Right target ->
                             launch
@@ -363,29 +368,6 @@ handleKey key mods s
                                         (\w -> w{wzConfirmInput = ""})
                                             <$> stWizard s
                                     }
-            _ -> continue s
-        WzNickname -> case key of
-            KEnter
-                | T.null (T.strip $ wzNicknameInput $ wizardOf s) -> toEnableAsk
-                | otherwise -> case wzNew $ wizardOf s of
-                    Nothing -> toEnableAsk
-                    Just p ->
-                        launch
-                            (Nickname p (T.strip $ wzNicknameInput $ wizardOf s))
-                            s
-                                { stWizard =
-                                    (\w -> w{wzNicknameInput = ""})
-                                        <$> stWizard s
-                                }
-            KEsc -> toEnableAsk
-            KBS ->
-                continue s{stWizard = editNicknameInput <$> stWizard s}
-            KChar c ->
-                continue s{stWizard = (`snocNickname` c) <$> stWizard s}
-            _ -> continue s
-        WzDone -> case key of
-            KEsc -> closeWizard s
-            KEnter -> closeWizard s
             _ -> continue s
     formEnter = case formFocus $ stForm s of
         QrField
@@ -413,28 +395,16 @@ handleKey key mods s
                                 { wzPhase = WzSource
                                 , wzKnownIccids =
                                     map profileIccid $ snapProfiles snap
-                                , wzNew = Nothing
-                                , wzNicknameInput = ""
                                 , wzConfirmInput = ""
                                 }
                     }
-    closeWizard st =
-        Continue
-            st
-                { stView = ProfilesView
-                , stForm = emptyForm
-                , stWizard = Nothing
-                }
-            Nothing
+    closeWizard st = Continue (leaveWizard st) Nothing
     wizardOf st = case stWizard st of
         Just w -> w
-        Nothing -> Wizard WzSource [] Nothing "" ""
-    toEnableAsk = case wzNew $ wizardOf s of
-        Nothing -> closeWizard s
-        Just p -> continue s{stConfirm = Just p}
+        Nothing -> Wizard WzSource [] ""
     submit =
-        let Form{formSmdp, formCode} = stForm s
-        in  case resolveDownloadInput formSmdp formCode of
+        let Form{formSmdp, formCode, formConfirmation} = stForm s
+        in  case confirmed formConfirmation <$> resolveDownloadInput formSmdp formCode of
                 Left err -> continue s{stStatus = Just $ Failure err}
                 Right target
                     | targetConfirmationRequired target
@@ -554,7 +524,8 @@ finishJob JobResult{..} s =
     in  advanceWizard resultJob resultOutcome resultSnapshot s2
 
 {- | Move a guided install forward after one of its jobs finished.
-A failure closes it; success advances by the step that ran.
+A read QR code waits for Enter; a finished download, good or bad,
+returns to the profile list.
 -}
 advanceWizard
     :: Job
@@ -567,40 +538,40 @@ advanceWizard job outcome snapshot s = case stWizard s of
     Just w -> case job of
         -- Reading the QR is part of the source step; its failure
         -- leaves the wizard where it is.
-        DecodeQr _ -> (s, Nothing)
-        _ -> case outcome of
-            Left _ -> (s{stWizard = Nothing}, Nothing)
-            Right _ -> case job of
-                Download _ _ -> case newProfileOf w snapshot of
-                    [p] ->
-                        ( s
-                            { stWizard =
-                                Just
-                                    w
-                                        { wzPhase = WzNickname
-                                        , wzNew = Just p
-                                        , wzNicknameInput = ""
-                                        }
-                            }
-                        , Nothing
-                        )
-                    _ -> (s{stWizard = Nothing}, Nothing)
-                Nickname _ _ ->
-                    (s{stConfirm = wzNew w}, Nothing)
-                Enable _ ->
-                    let seqs = case snapshot of
-                            Just (Right snap) ->
-                                map notificationSeq $ snapNotifications snap
-                            _ -> []
-                    in  if null seqs
-                            then (s{stWizard = Just w{wzPhase = WzDone}}, Nothing)
-                            else
-                                ( s{stWizard = Just w}
-                                , Just $ SendNotifications seqs
-                                )
-                SendNotifications _ ->
-                    (s{stWizard = Just w{wzPhase = WzDone}}, Nothing)
-                _ -> (s, Nothing)
+        DecodeQr _ -> case outcome of
+            Right _ ->
+                ( s
+                    { stWizard = Just w{wzPhase = WzReady}
+                    , stStatus = Just $ Info "QR code read."
+                    }
+                , Nothing
+                )
+            Left _ -> (s, Nothing)
+        Download _ _ -> case (outcome, newProfileOf w snapshot) of
+            (Right _, [p]) ->
+                ( (leaveWizard s)
+                    { stProfileCursor =
+                        length $ takeWhile ((/= profileIccid p) . profileIccid) $ profilesOf s
+                    , stStatus =
+                        Just
+                            $ Info
+                            $ "Installed "
+                                <> profileLabel p
+                                <> ". e enables it, m names it."
+                    }
+                , Nothing
+                )
+            _ -> (leaveWizard s, Nothing)
+        _ -> (s, Nothing)
+
+-- | Close the guided install, back to the profile list.
+leaveWizard :: State -> State
+leaveWizard s =
+    s
+        { stView = ProfilesView
+        , stForm = emptyForm
+        , stWizard = Nothing
+        }
 
 -- | The profiles that appeared with the latest card read.
 newProfileOf
@@ -621,6 +592,7 @@ fillFrom target s =
                 { formSmdp = targetSmdp target
                 , formCode = revealSecret $ targetMatchingId target
                 , formFocus = CodeField
+                , formConfirmation = targetConfirmationRequired target
                 }
         }
 
@@ -635,13 +607,6 @@ editConfirm w = w{wzConfirmInput = T.dropEnd 1 $ wzConfirmInput w}
 
 snocConfirm :: Wizard -> Char -> Wizard
 snocConfirm w c = w{wzConfirmInput = T.snoc (wzConfirmInput w) c}
-
-editNicknameInput :: Wizard -> Wizard
-editNicknameInput w =
-    w{wzNicknameInput = T.dropEnd 1 $ wzNicknameInput w}
-
-snocNickname :: Wizard -> Char -> Wizard
-snocNickname w c = w{wzNicknameInput = T.snoc (wzNicknameInput w) c}
 
 -- | The profile under the cursor.
 selectedProfile :: State -> Maybe Profile
@@ -673,3 +638,11 @@ smdpDisplay Form{formSmdp}
     maskFrom i segment
         | i >= 2 = mask segment
         | otherwise = segment
+
+-- | Carry a QR code's confirmation flag into the target the form builds.
+confirmed :: Bool -> DownloadTarget -> DownloadTarget
+confirmed flag target =
+    target
+        { targetConfirmationRequired =
+            flag || targetConfirmationRequired target
+        }

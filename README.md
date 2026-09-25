@@ -19,12 +19,11 @@ so profiles can be inspected and switched without remembering ICCIDs.
   the filesystem: Enter on the empty QR path field opens it,
   Enter picks the image and the decode starts. The code is
   masked on screen.
-- **Guided install** (`g`): read the purchase QR, download, name the
-  plan, enable it after a y/n, send the pending notifications, and
-  end on the instruction to move the card to the phone and turn data
-  roaming on. Activation codes that ask for a confirmation code
-  (GSMA `LPA:1$...$...$1`) are handled here: the code is asked for,
-  masked, and passed to `lpac -c`.
+- **Guided install** (`g`): pick the purchase QR image, check what it
+  holds, press enter, and land back on the list with the new plan
+  selected (`e` enables it, `m` names it). Activation codes that ask
+  for a confirmation code (GSMA `LPA:1$...$...$1`) are handled here:
+  the code is asked for, masked, and passed to `lpac -c`.
 - **Refresh** the card state at any time.
 
 There is **no delete action**. Profiles can only be removed with
@@ -54,7 +53,7 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 | Notifications | up/down select, `s` send selected, `a` send all, `p`/esc back, `r` refresh, `q` quit |
 | Download | tab switch field, enter on an empty QR path opens the file picker, enter on the code downloads, esc cancel (clears the code) |
 | File picker | up/down (or j/k) select, enter picks the file or enters a directory, backspace parent, esc cancel |
-| Guided install | as download, then: confirmation code enter submits, nickname enter accepts (empty skips), y/n enable, esc on the closing screen returns |
+| Guided install | as download; after the QR is read, enter installs and esc cancels; a confirmation code is typed and submitted with enter |
 
 While an `lpac` call runs, the status line says so and new actions are
 refused; the screen keeps responding.

@@ -17,7 +17,6 @@ import Euicc.Lpac.Output
     ( ChipInfo (..)
     , LpacFailure (..)
     , Profile (..)
-    , ProfileState (..)
     , parseNotifications
     , parseProfiles
     )
@@ -125,54 +124,27 @@ submitKeys =
 dummyTarget :: DownloadTarget
 dummyTarget = DownloadTarget "x.example" (mkSecret "X") False
 
-dummyProfile :: Profile
-dummyProfile =
-    Profile
-        { profileIccid = "0"
-        , profileAid = ""
-        , profileState = OtherState "unknown"
-        , profileNickname = Nothing
-        , profileProvider = Nothing
-        , profileName = Nothing
-        }
-
--- | The wizard at the nickname step, after a successful download.
-atNickname :: IO State
-atNickname = do
+-- | The wizard after a QR code was read, waiting for Enter.
+atReady :: Bool -> IO State
+atReady confirmation = do
     s0 <- loaded
-    snap <- snapshotWithNew
-    let (s2, _) = pressAll submitKeys s0
+    let (s1, _) = pressAll ([KChar 'g'] <> typeText "plan.png" <> [KEnter]) s0
+        target =
+            DownloadTarget
+                { targetSmdp = "qr-smdp.example.org"
+                , targetMatchingId = mkSecret "QR-MATCH-7X"
+                , targetConfirmationRequired = confirmation
+                }
     pure $
         apply
-            ( jobResult
-                (Download dummyTarget Nothing)
-                (Right "Profile downloaded.")
-                (Just (Right snap))
-            )
-            s2
-
--- | The wizard asking y/n before enabling the new plan.
-atEnableAsk :: IO State
-atEnableAsk = do
-    s3 <- atNickname
-    let (s4, _) = pressAll [KEnter] s3
-    pure s4
-
--- | The wizard on the closing screen.
-atDone :: IO State
-atDone = do
-    s5 <- atEnableAsk
-    snap <- loadedSnapshot
-    let (s6, _) = pressAll [KChar 'y'] s5
-        (s7, _) =
-            finishJob
-                ( jobResult
-                    (Enable dummyProfile)
-                    (Right "Enabled.")
-                    (Just (Right snap{snapNotifications = []}))
-                )
-                s6
-    pure s7
+            JobResult
+                { resultJob = DecodeQr "plan.png"
+                , resultOutcome = Right "QR code read."
+                , resultSnapshot = Nothing
+                , resultQr = Just target
+                , resultDir = Nothing
+                }
+            s1
 
 -- | Press one key, expecting the program to continue.
 press :: Key -> State -> (State, Maybe Job)
@@ -421,7 +393,35 @@ spec = do
             fmap wzConfirmInput (stWizard s1) `shouldBe` Just ""
             formCode (stForm s1) `shouldBe` ""
             show s1 `shouldSatisfy` (not . T.isInfixOf "C-7" . T.pack)
-        it "offers to name the new plan after a download" $ do
+        it "waits for Enter after reading the QR code" $ do
+            s1 <- atReady False
+            fmap wzPhase (stWizard s1) `shouldBe` Just WzReady
+            stView s1 `shouldBe` WizardView
+        it "installs the read plan on Enter" $ do
+            s1 <- atReady False
+            let (_, js) = pressAll [KEnter] s1
+            js
+                `shouldBe` [ Download
+                                ( DownloadTarget
+                                    "qr-smdp.example.org"
+                                    (mkSecret "QR-MATCH-7X")
+                                    False
+                                )
+                                Nothing
+                           ]
+        it "cancels the read plan on Esc" $ do
+            s1 <- atReady False
+            let (s2, js) = pressAll [KEsc] s1
+            js `shouldBe` []
+            stView s2 `shouldBe` ProfilesView
+            stWizard s2 `shouldBe` Nothing
+            formCode (stForm s2) `shouldBe` ""
+        it "asks the confirmation code of a read plan on Enter" $ do
+            s1 <- atReady True
+            let (s2, js) = pressAll [KEnter] s1
+            js `shouldBe` []
+            fmap wzPhase (stWizard s2) `shouldBe` Just WzConfirm
+        it "returns to the list on the new plan after a download" $ do
             s0 <- loaded
             snap' <- snapshotWithNew
             let (s2, _) = pressAll submitKeys s0
@@ -433,19 +433,17 @@ spec = do
                             (Just (Right snap'))
                         )
                         s2
-            fmap wzPhase (stWizard s3) `shouldBe` Just WzNickname
-            fmap (fmap profileIccid . wzNew) (stWizard s3)
-                `shouldBe` Just (Just "8900000000000000099")
-        it "closes when the download reveals no new profile" $ do
+            stView s3 `shouldBe` ProfilesView
+            stWizard s3 `shouldBe` Nothing
+            fmap profileIccid (selectedProfile s3)
+                `shouldBe` Just "8900000000000000099"
+            stStatus s3 `shouldSatisfy` \case
+                Just (Info t) -> "Installed" `T.isPrefixOf` t
+                _ -> False
+        it "returns to the list when the download reveals no new profile" $ do
             s0 <- loaded
             snap <- loadedSnapshot
-            let (s2, _) =
-                    pressAll
-                        ( [KChar 'g', KChar '\t', KChar '\t']
-                            <> typeText "LPA:1$smdp.example.com$AB-12"
-                            <> [KEnter]
-                        )
-                        s0
+            let (s2, _) = pressAll submitKeys s0
                 s3 =
                     apply
                         ( jobResult
@@ -454,86 +452,11 @@ spec = do
                             (Just (Right snap))
                         )
                         s2
+            stView s3 `shouldBe` ProfilesView
             stWizard s3 `shouldBe` Nothing
-        it "names the new plan on Enter" $ do
-            s3 <- atNickname
-            let (s4, js) = pressAll (typeText "holiday" <> [KEnter]) s3
-            fmap (fmap profileIccid . wzNew) (stWizard s3)
-                `shouldBe` Just (Just "8900000000000000099")
-            js `shouldSatisfy` \case
-                [Nickname p "holiday"] -> profileIccid p == "8900000000000000099"
-                _ -> False
-            stWizard s4 `shouldSatisfy` (/= Nothing)
-        it "skips the nickname when Enter is empty" $ do
-            s3 <- atNickname
-            let (s4, _) = pressAll [KEnter] s3
-            fmap profileIccid (stConfirm s4)
-                `shouldBe` Just "8900000000000000099"
-        it "asks before enabling after naming" $ do
-            s3 <- atNickname
-            snap <- loadedSnapshot
-            let (s4, _) = pressAll (typeText "holiday" <> [KEnter]) s3
-                s5 =
-                    apply
-                        ( jobResult
-                            (Nickname dummyProfile "holiday")
-                            (Right "Named holiday.")
-                            (Just (Right snap))
-                        )
-                        s4
-            fmap profileIccid (stConfirm s5)
-                `shouldBe` Just "8900000000000000099"
-        it "sends the pending notifications after enabling" $ do
-            s5 <- atEnableAsk
-            let (s6, js) = pressAll [KChar 'y'] s5
-            js `shouldSatisfy` \case
-                [Enable p] -> profileIccid p == "8900000000000000099"
-                _ -> False
-            snap <- loadedSnapshot
-            let (s7, chained) =
-                    finishJob
-                        (jobResult (Enable dummyProfile) (Right "Enabled.") (Just (Right snap)))
-                        s6
-            chained `shouldBe` Just (SendNotifications [7, 8])
-            fmap wzPhase (stWizard s7) `shouldSatisfy` (/= Just WzDone)
-            let (s8, chained') =
-                    finishJob
-                        ( jobResult
-                            (SendNotifications [7, 8])
-                            (Right "Notifications sent.")
-                            (Just (Right snap{snapNotifications = []}))
-                        )
-                        s7
-            chained' `shouldBe` Nothing
-            fmap wzPhase (stWizard s8) `shouldBe` Just WzDone
-        it "finishes without notifications to send" $ do
-            s5 <- atEnableAsk
-            snap <- loadedSnapshot
-            let (s6, _) = pressAll [KChar 'y'] s5
-                (s7, chained) =
-                    finishJob
-                        ( jobResult
-                            (Enable dummyProfile)
-                            (Right "Enabled.")
-                            (Just (Right snap{snapNotifications = []}))
-                        )
-                        s6
-            chained `shouldBe` Nothing
-            fmap wzPhase (stWizard s7) `shouldBe` Just WzDone
-        it "closes from the closing screen" $ do
-            s8 <- atDone
-            let (s9, _) = pressAll [KEsc] s8
-            stView s9 `shouldBe` ProfilesView
-            stWizard s9 `shouldBe` Nothing
-        it "a failed download closes the wizard with the failure" $ do
+        it "a failed download returns to the list with the failure" $ do
             s0 <- loaded
-            let (s2, _) =
-                    pressAll
-                        ( [KChar 'g', KChar '\t', KChar '\t']
-                            <> typeText "LPA:1$smdp.example.com$AB-12"
-                            <> [KEnter]
-                        )
-                        s0
+            let (s2, _) = pressAll submitKeys s0
                 s3 =
                     apply
                         ( jobResult
@@ -542,6 +465,7 @@ spec = do
                             Nothing
                         )
                         s2
+            stView s3 `shouldBe` ProfilesView
             stWizard s3 `shouldBe` Nothing
             stStatus s3 `shouldSatisfy` \case
                 Just (Failure _) -> True

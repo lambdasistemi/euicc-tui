@@ -52,7 +52,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Euicc.Job
-    ( Job
+    ( Job (..)
     , JobResult
     , LpacRunner
     , Snapshot (..)
@@ -279,6 +279,22 @@ wizardBody s = case wzPhase w of
             , txt "or tab to the other fields and type the code."
             , txt "The activation code is never shown."
             ]
+    WzReady
+        | Just (Download _ _) <- stBusy s ->
+            vBox
+                [ txt "Installing the plan on the card..."
+                , txt " "
+                , txt "This takes a few seconds; the list follows."
+                ]
+        | otherwise ->
+            vBox
+                [ txt "QR code read."
+                , txt " "
+                , txt $ "SM-DP+ address   " <> smdpDisplay form
+                , txt $ "Activation code  " <> codeDisplay form
+                , txt " "
+                , txt "enter installs the plan, esc cancels"
+                ]
     WzConfirm ->
         vBox
             [ txt "This activation code asks for a confirmation code."
@@ -295,34 +311,8 @@ wizardBody s = case wzPhase w of
             , txt " "
             , txt "enter confirms, esc cancels the install"
             ]
-    WzNickname ->
-        vBox
-            [ txt "Give the plan a nickname (optional)."
-            , txt "The list shows nicknames, so plans from the same"
-            , txt "provider stay distinguishable."
-            , txt " "
-            , hBox
-                [ txt "Nickname  "
-                , highlight True
-                    $ hLimit 50
-                    $ padRight Max
-                    $ txt
-                    $ wzNicknameInput w
-                ]
-            , txt " "
-            , txt "enter accepts (empty skips), esc skips"
-            ]
-    WzDone ->
-        vBox
-            [ txt "The plan is installed and enabled."
-            , txt " "
-            , txt "Move the card to the phone and turn data roaming"
-            , txt "ON for this SIM."
-            , txt " "
-            , txt "esc returns to the profile list."
-            ]
   where
-    w = fromMaybe (Wizard WzSource [] Nothing "" "") $ stWizard s
+    w = fromMaybe (Wizard WzSource [] "") $ stWizard s
     form = stForm s
     field f label value =
         hBox
@@ -385,11 +375,10 @@ helpLine s = padLeftRight 1 $ str $ case stView s of
         \r refresh  q quit"
     DownloadView ->
         "tab switch field  enter download  esc cancel"
-    WizardView -> case wzPhase $ fromMaybe (Wizard WzSource [] Nothing "" "") $ stWizard s of
+    WizardView -> case wzPhase $ fromMaybe (Wizard WzSource [] "") $ stWizard s of
         WzSource -> "tab switch field  enter continue  esc cancel install"
+        WzReady -> "enter install  esc cancel"
         WzConfirm -> "type the code  enter confirm  esc cancel install"
-        WzNickname -> "type a nickname  enter accept  esc skip"
-        WzDone -> "esc back to the profiles"
 
 browserLayer :: State -> Widget ()
 browserLayer s = case stBrowser s of
