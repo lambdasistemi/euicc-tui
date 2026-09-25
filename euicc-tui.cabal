@@ -4,8 +4,8 @@ version:            0.1.0.0
 synopsis:           Terminal UI for eUICC profile management over lpac
 description:
   A brick terminal UI that drives @lpac@ over PC/SC to list, enable
-  and download eSIM profiles on a removable eUICC card, and to send
-  its pending notifications. It never deletes a profile.
+  download, nickname and delete eSIM profiles on a removable eUICC
+  card, and to send its pending notifications.
 
 homepage:           https://github.com/lambdasistemi/euicc-tui
 bug-reports:        https://github.com/lambdasistemi/euicc-tui/issues
@@ -80,10 +80,12 @@ library
     , vty-crossplatform  >=0.4    && <0.6
 
 executable euicc-tui
-  import:         warnings, extensions
-  hs-source-dirs: app
-  main-is:        Main.hs
-  ghc-options:    -threaded -rtsopts
+  import:          warnings, extensions
+  hs-source-dirs:  app
+  main-is:         Main.hs
+  other-modules:   Paths_euicc_tui
+  autogen-modules: Paths_euicc_tui
+  ghc-options:     -threaded -rtsopts
   build-depends:
     , base       >=4.18 && <5
     , euicc-tui
