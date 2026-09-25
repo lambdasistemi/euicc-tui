@@ -23,7 +23,15 @@ import Euicc.Lpac.Output
     )
 import Fixtures (fixture, fixtureOk)
 import System.Exit (ExitCode (..))
-import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
+import Data.List (sort)
+import Test.Hspec
+    ( Spec
+    , describe
+    , it
+    , shouldBe
+    , shouldContain
+    , shouldSatisfy
+    )
 
 -- | A card that answers reads from fixtures and actions as given.
 fakeCard
@@ -61,6 +69,12 @@ snapOf = fromMaybe (Left (UnexpectedOutput "no card read")) . resultSnapshot
 
 reads' :: [Command]
 reads' = [ReadChipInfo, ListProfiles, ListNotifications]
+
+entryNames :: [(Bool, T.Text)] -> [T.Text]
+entryNames = map snd
+
+noDotEntries :: [(Bool, T.Text)] -> Bool
+noDotEntries = all (\(_, name) -> name /= "." && name /= "..")
 
 spec :: Spec
 spec = do
@@ -191,6 +205,26 @@ spec = do
             let shown = either describeFailure id $ resultOutcome r
             shown `shouldSatisfy` (not . T.isInfixOf "SECRET-MATCHING-ID")
             shown `shouldSatisfy` T.isInfixOf "refused"
+    describe "ReadDir" $ do
+        it "lists a directory without touching the card" $ do
+            (r, cmds) <-
+                runRecorded (const Nothing) (ReadDir "test/fixtures")
+            cmds `shouldBe` []
+            resultSnapshot r `shouldBe` Nothing
+            case resultDir r of
+                Nothing -> error "no directory listing in the result"
+                Just (cwd, entries) -> do
+                    cwd `shouldBe` "test/fixtures"
+                    entryNames entries
+                        `shouldContain` ["qr-lpa-ok.png", "qr-none.png"]
+                    entryNames entries `shouldSatisfy` (\names -> names == sort names)
+                    entries `shouldSatisfy` noDotEntries
+        it "reports a missing directory" $ do
+            (r, cmds) <-
+                runRecorded (const Nothing) (ReadDir "no-such-dir")
+            cmds `shouldBe` []
+            resultDir r `shouldBe` Nothing
+            resultOutcome r `shouldSatisfy` either (const True) (const False)
     describe "DecodeQr" $ do
         it "reads an image without touching the card" $ do
             (r, cmds) <-

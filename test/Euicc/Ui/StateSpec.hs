@@ -327,6 +327,7 @@ spec = do
                             , resultOutcome = Right "QR code read."
                             , resultSnapshot = Nothing
                             , resultQr = Just target
+                            , resultDir = Nothing
                             }
                         s1
             formSmdp (stForm s2) `shouldBe` "qr-smdp.example.org"

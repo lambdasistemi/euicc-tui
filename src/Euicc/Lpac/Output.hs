@@ -118,6 +118,8 @@ data LpacFailure
       WrongApduBackend
     | -- | a QR image could not be decoded into an activation code
       QrDecode Text
+    | -- | a directory could not be listed for the picker
+      DirFailure Text
     | -- | lpac reported an error: failing function and detail
       LpacError Text Text
     | -- | output that could not be understood, with context
@@ -153,6 +155,7 @@ describeFailure = \case
         "lpac tried a modem backend instead of the smart-card \
         \reader. It must run with LPAC_APDU=pcsc."
     QrDecode msg -> "The QR image could not be used: " <> msg
+    DirFailure msg -> "The directory could not be read: " <> msg
     LpacError function detail
         | T.null (T.strip detail) -> "lpac failed in " <> function <> "."
         | otherwise -> "lpac failed in " <> function <> ": " <> detail

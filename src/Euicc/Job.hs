@@ -31,6 +31,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
 import Euicc.ActivationCode (DownloadTarget (..), Secret, redact)
+import Euicc.Dir (DirEntry, listDir)
 import Euicc.Lpac.Command (Command (..))
 import Euicc.Lpac.Output
     ( ChipInfo
@@ -66,6 +67,8 @@ data Job
       Download DownloadTarget (Maybe Secret)
     | -- | read an activation code from a QR image file
       DecodeQr FilePath
+    | -- | list a directory for the QR image picker
+      ReadDir FilePath
     deriving stock (Eq, Show)
 
 -- | Everything the UI shows about the card.
@@ -88,6 +91,8 @@ data JobResult = JobResult
     -}
     , resultQr :: Maybe DownloadTarget
     -- ^ the activation code a 'DecodeQr' job read, if any
+    , resultDir :: Maybe (FilePath, [DirEntry])
+    -- ^ the listing a 'ReadDir' job produced, if any
     }
     deriving stock (Eq, Show)
 
@@ -105,6 +110,7 @@ jobResult job outcome snapshot =
         , resultOutcome = outcome
         , resultSnapshot = snapshot
         , resultQr = Nothing
+        , resultDir = Nothing
         }
 
 -- | A short description of a running job, for the busy indicator.
@@ -119,6 +125,7 @@ jobLabel = \case
     Download DownloadTarget{targetSmdp} _ ->
         "downloading from " <> targetSmdp
     DecodeQr _ -> "reading the QR image"
+    ReadDir _ -> "listing the directory"
 
 {- | Run one command, turning any exception into output so that a
 failure is always reported, never thrown.
@@ -155,6 +162,17 @@ runJob runner job = case job of
                 , resultOutcome = "QR code read." <$ decoded
                 , resultSnapshot = Nothing
                 , resultQr = either (const Nothing) Just decoded
+                , resultDir = Nothing
+                }
+    ReadDir path -> do
+        listed <- listDir path
+        pure
+            JobResult
+                { resultJob = job
+                , resultOutcome = "Directory read." <$ listed
+                , resultSnapshot = Nothing
+                , resultQr = Nothing
+                , resultDir = either (const Nothing) Just listed
                 }
     _ -> do
         outcome <- act
@@ -171,6 +189,7 @@ runJob runner job = case job of
                     _ -> outcome
                 , resultSnapshot = snapshot
                 , resultQr = Nothing
+                , resultDir = Nothing
                 }
   where
     done message command =
@@ -192,6 +211,7 @@ runJob runner job = case job of
                     "Profile downloaded."
                     (DownloadProfile target confirmation)
         DecodeQr _ -> pure $ Right ""
+        ReadDir _ -> pure $ Right ""
 
 -- | Remove a secret from every text a failure carries.
 redactFailure :: Secret -> LpacFailure -> LpacFailure
