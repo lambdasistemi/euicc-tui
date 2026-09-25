@@ -56,7 +56,7 @@ pkgs.writeShellApplication {
       [ "$version" = "euicc-tui ''${artifact_version%%-*}" ] \
         || fail "$label: unexpected version '$version'"
       echo "$label: $version"
-      lpac="$(find "$root/nix/store" -maxdepth 3 -path '*-lpac-*/bin/lpac' | head -1)"
+      lpac="$(find "$root/nix/store" -maxdepth 3 -path '*-lpac-*/bin/lpac' -print -quit)"
       [ -n "$lpac" ] || fail "$label: lpac is not bundled"
       "$lpac" version >/dev/null || fail "$label: lpac version failed"
       echo "$label: lpac bundled"
@@ -75,7 +75,8 @@ pkgs.writeShellApplication {
       || fail "deb: Depends is '$depends', not 'pcscd, libccid, libpcsclite1'"
     echo "deb: Depends: $depends"
     # dpkg cannot unpack a hard link to a file it has not unpacked yet
-    if dpkg-deb --fsys-tarfile "$deb" | tar -tv | grep -q ' link to '; then
+    dpkg-deb --fsys-tarfile "$deb" | tar -tv > "$workdir/deb.list"
+    if grep -q ' link to ' "$workdir/deb.list"; then
       fail "deb: contains hard links"
     fi
     dpkg-deb -x "$deb" "$workdir/deb"
@@ -92,7 +93,7 @@ pkgs.writeShellApplication {
     # no inherited setgid bit on the directories cpio creates
     chmod g-s "$workdir/rpm"
     (cd "$workdir/rpm" && rpm2cpio "$rpm" | cpio -idm --quiet)
-    links="$(find "$workdir/rpm" -type f -links +1 | head -3)"
+    links="$(find "$workdir/rpm" -type f -links +1 -print -quit)"
     [ -z "$links" ] || fail "rpm: contains hard links: $links"
     smoke_root rpm "$workdir/rpm" "$(usr_bin_target "$workdir/rpm" rpm)"
 
