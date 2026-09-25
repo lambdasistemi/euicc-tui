@@ -5,6 +5,9 @@ module Euicc.Ui.State
     , Form (..)
     , Field (..)
     , Status (..)
+    , Wizard (..)
+    , WizardPhase (..)
+    , confirmDisplay
     , emptyForm
 
       -- * Transitions
@@ -59,6 +62,7 @@ data View
     = ProfilesView
     | NotificationsView
     | DownloadView
+    | WizardView
     deriving stock (Eq, Show)
 
 -- | The two fields of the download form.
@@ -94,6 +98,32 @@ data Status
     | Failure Text
     deriving stock (Eq, Show)
 
+-- | Where a guided install stands.
+data WizardPhase
+    = -- | QR image path, SM-DP+ address and activation code
+      WzSource
+    | -- | the activation code asks for a confirmation code
+      WzConfirm
+    | -- | optional nickname for the plan just downloaded
+      WzNickname
+    | -- | closing instruction, everything worked
+      WzDone
+    deriving stock (Eq, Show)
+
+-- | The state of a guided install.
+data Wizard = Wizard
+    { wzPhase :: WizardPhase
+    , wzKnownIccids :: [Text]
+    -- ^ the profiles that existed before the download; the new plan
+    -- is the one that appears besides them
+    , wzNew :: Maybe Profile
+    -- ^ the plan the wizard just downloaded
+    , wzNicknameInput :: Text
+    , wzConfirmInput :: Text
+    -- ^ the confirmation code while it is typed; cleared on submit
+    }
+    deriving stock (Eq, Show)
+
 -- | The whole UI state.
 data State = State
     { stView :: View
@@ -104,6 +134,8 @@ data State = State
     , stForm :: Form
     , stConfirm :: Maybe Profile
     -- ^ a profile waiting for y/n before being enabled
+    , stWizard :: Maybe Wizard
+    -- ^ a guided install in progress
     , stBusy :: Maybe Job
     -- ^ the job in flight
     , stStatus :: Maybe Status
@@ -128,6 +160,7 @@ start =
         , stNotificationCursor = 0
         , stForm = emptyForm
         , stConfirm = Nothing
+        , stWizard = Nothing
         , stBusy = Just Refresh
         , stStatus = Nothing
         }
@@ -143,6 +176,7 @@ handleKey key mods s
         ProfilesView -> profiles
         NotificationsView -> notifications
         DownloadView -> download
+        WizardView -> wizard
   where
     continue s' = Continue s' Nothing
     confirming p = case key of
@@ -160,6 +194,7 @@ handleKey key mods s
         KChar 'r' -> launch Refresh s
         KChar 'n' -> switchTo NotificationsView
         KChar 'd' -> switchTo DownloadView
+        KChar 'g' -> openWizard
         _ -> continue s
     notifications = case key of
         KChar 'q' -> Halt
@@ -202,6 +237,57 @@ handleKey key mods s
                             Just $ Info $ profileLabel p <> " is already enabled."
                         }
             | otherwise -> continue s{stConfirm = Just p}
+    wizard = case wzPhase $ wizardOf s of
+        WzSource -> case key of
+            KEsc -> closeWizard s
+            KChar '\t' -> continue $ onForm switchField
+            KBackTab -> continue $ onForm switchField
+            KUp -> continue $ onForm switchField
+            KDown -> continue $ onForm switchField
+            KBS -> continue $ onForm $ editField $ T.dropEnd 1
+            KChar c -> continue $ onForm $ editField (`T.snoc` c)
+            KEnter -> submit
+            _ -> continue s
+        WzConfirm -> case key of
+            KEsc -> closeWizard s
+            _ -> continue s
+        WzNickname -> case key of
+            KEsc -> closeWizard s
+            _ -> continue s
+        WzDone -> case key of
+            KEsc -> closeWizard s
+            KEnter -> closeWizard s
+            _ -> continue s
+    openWizard = case snapshotOf s of
+        Nothing ->
+            continue s{stStatus = Just $ Info "Read the card first (r)."}
+        Just snap ->
+            continue
+                s
+                    { stView = WizardView
+                    , stForm = emptyForm
+                    , stWizard =
+                        Just
+                            Wizard
+                                { wzPhase = WzSource
+                                , wzKnownIccids =
+                                    map profileIccid $ snapProfiles snap
+                                , wzNew = Nothing
+                                , wzNicknameInput = ""
+                                , wzConfirmInput = ""
+                                }
+                    }
+    closeWizard st =
+        Continue
+            st
+                { stView = ProfilesView
+                , stForm = emptyForm
+                , stWizard = Nothing
+                }
+                Nothing
+    wizardOf st = case stWizard st of
+        Just w -> w
+        Nothing -> Wizard WzSource [] Nothing "" ""
     submit =
         let Form{formSmdp, formCode} = stForm s
         in  case resolveDownloadInput formSmdp formCode of
@@ -244,6 +330,12 @@ editField :: (Text -> Text) -> Form -> Form
 editField edit f = case formFocus f of
     SmdpField -> f{formSmdp = edit $ formSmdp f}
     CodeField -> f{formCode = edit $ formCode f}
+
+{- | What the confirmation-code field of the wizard shows: one @*@ per
+character.
+-}
+confirmDisplay :: Wizard -> Text
+confirmDisplay = mask . wzConfirmInput
 
 -- | Keep a cursor within a list of the given length.
 clamp :: Int -> Int -> Int

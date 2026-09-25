@@ -18,6 +18,8 @@ import Euicc.Ui.State
     , Status (..)
     , Step (..)
     , View (..)
+    , Wizard (..)
+    , WizardPhase (..)
     , codeDisplay
     , finishJob
     , handleKey
@@ -201,6 +203,27 @@ spec = do
             s0 <- loaded
             stView (fst $ pressAll [KChar 'n', KEsc] s0)
                 `shouldBe` ProfilesView
+    describe "guided install" $ do
+        it "opens on g, remembering the card's ICCIDs" $ do
+            s0 <- loaded
+            let (s1, js) = pressAll [KChar 'g'] s0
+            js `shouldBe` []
+            stView s1 `shouldBe` WizardView
+            fmap wzKnownIccids (stWizard s1)
+                `shouldBe` Just
+                    ["8944476500001234567", "8939100000000000001"]
+            fmap wzPhase (stWizard s1) `shouldBe` Just WzSource
+        it "closes on Esc, back to the profiles" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'g', KEsc] s0
+            stView s1 `shouldBe` ProfilesView
+            stWizard s1 `shouldBe` Nothing
+            formCode (stForm s1) `shouldBe` ""
+        it "refuses to open before the card is read" $ do
+            let (s, _) = start
+                (s1, js) = pressAll [KChar 'g'] s
+            js `shouldBe` []
+            stView s1 `shouldBe` ProfilesView
     describe "download form" $ do
         it "downloads from typed address and code" $ do
             s0 <- loaded

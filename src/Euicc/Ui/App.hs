@@ -75,7 +75,10 @@ import Euicc.Ui.State
     , Status (..)
     , Step (..)
     , View (..)
+    , Wizard (..)
+    , WizardPhase (..)
     , codeDisplay
+    , confirmDisplay
     , finishJob
     , handleKey
     , smdpDisplay
@@ -191,6 +194,7 @@ body s = case stCard s of
         NotificationsView ->
             notificationsTable s $ snapNotifications snap
         DownloadView -> downloadForm $ stForm s
+        WizardView -> wizardBody s
 
 row :: [(Int, Text)] -> Widget ()
 row = hBox . map cell
@@ -257,6 +261,66 @@ notificationsTable s = \case
                 , (40, fromMaybe "" notificationAddress)
                 ]
 
+wizardBody :: State -> Widget ()
+wizardBody s = case wzPhase w of
+    WzSource -> vBox
+        [ txt "New plan — where does it come from?"
+        , txt " "
+        , field SmdpField "SM-DP+ address " $ smdpDisplay form
+        , field CodeField "Activation code" $ codeDisplay form
+        , txt " "
+        , txt "The activation code is never shown."
+        ]
+    WzConfirm -> vBox
+        [ txt "This activation code asks for a confirmation code."
+        , txt "The provider sent it separately; it is never shown."
+        , txt " "
+        , hBox
+            [ txt "Confirmation code  "
+            , highlight True
+                $ hLimit 50
+                $ padRight Max
+                $ txt $ confirmDisplay w
+            ]
+        , txt " "
+        , txt "enter confirms, esc cancels the install"
+        ]
+    WzNickname -> vBox
+        [ txt "Give the plan a nickname (optional)."
+        , txt "The list shows nicknames, so plans from the same"
+        , txt "provider stay distinguishable."
+        , txt " "
+        , hBox
+            [ txt "Nickname  "
+            , highlight True
+                $ hLimit 50
+                $ padRight Max
+                $ txt $ wzNicknameInput w
+            ]
+        , txt " "
+        , txt "enter accepts (empty skips), esc skips"
+        ]
+    WzDone -> vBox
+        [ txt "The plan is installed and enabled."
+        , txt " "
+        , txt "Move the card to the phone and turn data roaming"
+        , txt "ON for this SIM."
+        , txt " "
+        , txt "esc returns to the profile list."
+        ]
+  where
+    w = fromMaybe (Wizard WzSource [] Nothing "" "") $ stWizard s
+    form = stForm s
+    field f label value =
+        hBox
+            [ txt $ if formFocus form == f then "> " else "  "
+            , txt $ label <> "  "
+            , highlight (formFocus form == f)
+                $ hLimit 50
+                $ padRight Max
+                $ txt value
+            ]
+
 downloadForm :: Form -> Widget ()
 downloadForm form =
     padLeftRight 1 $
@@ -295,11 +359,18 @@ statusLine s = padLeftRight 1 $ case (stBusy s, stStatus s) of
 helpLine :: State -> Widget ()
 helpLine s = padLeftRight 1 $ str $ case stView s of
     ProfilesView ->
-        "up/down select  e enable  n notifications  d download  r refresh  q quit"
+        "up/down select  e enable  m nickname  n notifications  \
+        \d download  g guided install  r refresh  q quit"
     NotificationsView ->
-        "up/down select  s send selected  a send all  p profiles  r refresh  q quit"
+        "up/down select  s send selected  a send all  p profiles  \
+        \r refresh  q quit"
     DownloadView ->
         "tab switch field  enter download  esc cancel"
+    WizardView -> case wzPhase $ fromMaybe (Wizard WzSource [] Nothing "" "") $ stWizard s of
+        WzSource -> "tab switch field  enter continue  esc cancel install"
+        WzConfirm -> "type the code  enter confirm  esc cancel install"
+        WzNickname -> "type a nickname  enter accept  esc skip"
+        WzDone -> "esc back to the profiles"
 
 confirmLayer :: State -> Widget ()
 confirmLayer s = case stConfirm s of
