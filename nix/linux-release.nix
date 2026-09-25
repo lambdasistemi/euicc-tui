@@ -30,9 +30,10 @@ let
   # revision or release
   pkgVersion = builtins.replaceStrings [ "-" ] [ "+" ] artifactVersion;
 
-  # The installed tree shared by both packages. Hard links are not
-  # kept: an optimised store links identical files across store paths,
-  # and dpkg fails on a link to a file it has not unpacked yet.
+  # The installed tree shared by both packages. No copy here keeps hard
+  # links: an optimised store links identical files, across store paths
+  # and inside this tree once it is built, and dpkg fails on a link to a
+  # file it has not unpacked yet.
   root = pkgs.runCommand "${name}-${artifactVersion}-root" { } ''
     mkdir -p $out/nix/store $out/usr/bin
     while read -r path; do
@@ -55,7 +56,7 @@ let
       pkgs.lib.splitString "\n" (pkgs.lib.removeSuffix "\n" description)
     )}'';
   deb = pkgs.runCommand "${name}-${artifactVersion}.deb" { nativeBuildInputs = [ pkgs.dpkg ]; } ''
-    cp -a ${root} tree
+    cp -a --no-preserve=links ${root} tree
     chmod -R u+w tree
     mkdir -m 0755 tree/DEBIAN
     install -m 0644 ${control} tree/DEBIAN/control
@@ -83,7 +84,7 @@ let
     %description
     ${description}
     %install
-    cp -a ${root}/. %{buildroot}/
+    cp -a --no-preserve=links ${root}/. %{buildroot}/
     chmod -R u+w %{buildroot}
 
     %files
