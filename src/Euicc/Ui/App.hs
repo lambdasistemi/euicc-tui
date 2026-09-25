@@ -231,6 +231,10 @@ busyAttr = attrName "busy"
 stripe :: V.Color
 stripe = V.rgbColor (0xff :: Int) 0xff 0xd7
 
+-- | The background of the selected row and the active tab.
+selection :: V.Color
+selection = V.rgbColor (0xaf :: Int) 0xff 0xff
+
 -- | The background of the other table rows.
 paper :: V.Color
 paper = V.rgbColor (0xff :: Int) 0xff 0xff
@@ -241,11 +245,11 @@ attributes =
         V.defAttr
         [ (barAttr, V.white `on` V.blue `V.withStyle` V.bold)
         , (tabAttr, fg V.brightBlack)
-        , (tabActiveAttr, V.black `on` V.cyan `V.withStyle` V.bold)
+        , (tabActiveAttr, V.black `on` selection `V.withStyle` V.bold)
         , (columnAttr, V.defAttr `V.withStyle` V.bold)
         , (plainAttr, V.black `on` paper)
         , (stripeAttr, V.black `on` stripe)
-        , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
+        , (selectedAttr, V.black `on` selection `V.withStyle` V.bold)
         , (dimAttr, fg $ V.rgbColor (0x5f :: Int) 0x5f 0x5f)
         , (keyAttr, fg V.blue `V.withStyle` V.bold)
         , (buttonAttr, V.black `on` V.rgbColor (0xaf :: Int) 0xd7 0xff)
