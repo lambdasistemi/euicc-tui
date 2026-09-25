@@ -68,6 +68,7 @@ import Euicc.Lpac.Output
     , describeFailure
     , profileLabel
     )
+import Euicc.Ui.Theme (Theme (..))
 import Graphics.Vty (Key (..), Modifier (..))
 import System.FilePath (takeDirectory, (</>))
 
@@ -84,7 +85,7 @@ data Field
     = QrField
     | SmdpField
     | CodeField
-    deriving stock (Eq, Show)
+    deriving stock (Eq, Ord, Show)
 
 -- | The download form.
 data Form = Form
@@ -184,6 +185,8 @@ data State = State
     , stBusy :: Maybe Job
     -- ^ the job in flight
     , stStatus :: Maybe Status
+    , stTheme :: Theme
+    -- ^ light or dark; @t@ toggles it
     }
     deriving stock (Eq, Show)
 
@@ -212,9 +215,14 @@ start =
         , stHelp = False
         , stBusy = Just Refresh
         , stStatus = Nothing
+        , stTheme = Dark
         }
     , Refresh
     )
+
+-- | Swap the light and dark themes.
+toggleTheme :: State -> State
+toggleTheme s = s{stTheme = if stTheme s == Dark then Light else Dark}
 
 -- | React to a key press.
 handleKey :: Key -> [Modifier] -> State -> Step
@@ -313,6 +321,7 @@ handleKey key mods s
         KChar 'e' -> askEnable
         KEnter -> askEnable
         KChar 'r' -> launch Refresh s
+        KChar 't' -> continue $ toggleTheme s
         KChar 'n' -> switchTo NotificationsView
         KChar 'd' -> switchTo DownloadView
         KChar 'g' -> openWizard
@@ -341,6 +350,7 @@ handleKey key mods s
             [] -> continue s{stStatus = Just $ Info "Nothing to send."}
             seqs -> launch (SendNotifications seqs) s
         KChar 'r' -> launch Refresh s
+        KChar 't' -> continue $ toggleTheme s
         KChar 'p' -> continue s{stView = ProfilesView}
         KEsc -> continue s{stView = ProfilesView}
         KChar 'd' -> switchTo DownloadView
@@ -723,17 +733,23 @@ data Click
       ClickTab View
     | -- | left click on the picker entry with this index
       ClickPicker Int
+    | -- | left click on a form field
+      ClickField Field
+    | -- | left click on a key hint: the same as pressing the key
+      ClickKey Key
     | WheelUp
     | WheelDown
     deriving stock (Eq, Show)
 
 {- | React to a click. A click selects; a click on the profile or
 picker entry already selected acts like Enter, so every
-action keeps its keyboard confirmation. Notifications are sent
-only from the keyboard. Open dialogs ignore clicks.
+action keeps its confirmation. A click on a key hint presses
+that key, which is how dialogs take clicks. Notifications are
+sent only from the keyboard.
 -}
 handleClick :: Click -> State -> Step
 handleClick click s
+    | ClickKey k <- click = key k
     | stHelp s = Continue s{stHelp = False} Nothing
     | Just b <- stBrowser s = case click of
         ClickPicker i
@@ -768,7 +784,13 @@ handleClick click s
         (ProfilesView, WheelDown) -> key KDown
         (NotificationsView, WheelUp) -> key KUp
         (NotificationsView, WheelDown) -> key KDown
+        (DownloadView, ClickField f) -> onField f
+        (WizardView, ClickField f)
+            | Just WzSource <- wzPhase <$> stWizard s -> onField f
         _ -> ignore
   where
     key k = handleKey k [] s
+    onField f
+        | formFocus (stForm s) == f = key KEnter
+        | otherwise = Continue s{stForm = focus f $ stForm s} Nothing
     ignore = Continue s Nothing

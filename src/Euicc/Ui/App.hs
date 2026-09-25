@@ -31,6 +31,7 @@ import Brick
     , hBox
     , hLimit
     , halt
+    , modify
     , neverShowCursor
     , on
     , overrideAttr
@@ -55,7 +56,8 @@ import Brick.Widgets.Dialog (dialog, dialogAttr, renderDialog)
 import Control.Concurrent (forkIO)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Char (toLower, toUpper)
+import Data.ByteString qualified as B
+import Data.Char (toUpper)
 import Data.Foldable (traverse_)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -98,9 +100,17 @@ import Euicc.Ui.State
     , start
     , typing
     )
+import Euicc.Ui.Theme
+    ( Theme (..)
+    , detectTheme
+    , followChanges
+    , reportedTheme
+    , stopFollowing
+    , themeReports
+    )
 import Graphics.Vty qualified as V
 import Graphics.Vty.CrossPlatform (mkVty)
-import System.FilePath (takeExtension)
+import System.IO (hFlush, stdout)
 
 -- | A job finished on the worker thread.
 newtype AppEvent = JobDone JobResult
@@ -111,6 +121,8 @@ data Name
     | NotificationRow Int
     | TabOf View
     | PickerEntry Int
+    | FieldOf Field
+    | KeyButton V.Key
     deriving stock (Eq, Ord, Show)
 
 -- | Run the UI until the user quits.
@@ -120,32 +132,48 @@ runApp runner = do
     let launch job =
             void $ forkIO $ runJob runner job >>= writeBChan chan . JobDone
         (s0, j0) = start
+    (theme, follow) <- detectTheme
     launch j0
-    let buildVty = mkVty V.defaultConfig
+    let buildVty =
+            mkVty
+                V.defaultConfig
+                    { V.configInputMap = [r | follow, r <- themeReports]
+                    }
     vty <- buildVty
-    void $ customMain vty buildVty (Just chan) (app launch) s0
+    void $
+        customMain
+            vty
+            buildVty
+            (Just chan)
+            (app follow launch)
+            s0{stTheme = theme}
+    when follow $ B.putStr stopFollowing >> hFlush stdout
 
-app :: (Job -> IO ()) -> App State AppEvent Name
-app launch =
+app :: Bool -> (Job -> IO ()) -> App State AppEvent Name
+app follow launch =
     App
         { appDraw = draw
         , appChooseCursor = neverShowCursor
         , appHandleEvent = handleEvent launch
-        , appStartEvent = enableMouse
-        , appAttrMap = const attributes
+        , appStartEvent = setupTerminal follow
+        , appAttrMap = attributes . stTheme
         }
 
--- | Ask the terminal for mouse events, when it can report them.
-enableMouse :: EventM Name State ()
-enableMouse = do
+{- | Ask the terminal for mouse events, when it can report them, and
+for light/dark changes, when following them.
+-}
+setupTerminal :: Bool -> EventM Name State ()
+setupTerminal follow = do
     output <- V.outputIface <$> getVtyHandle
-    when (V.supportsMode output V.Mouse)
-        $ liftIO
-        $ V.setMode output V.Mouse True
+    liftIO $ do
+        when (V.supportsMode output V.Mouse) $ V.setMode output V.Mouse True
+        when follow $ V.outputByteBuffer output followChanges
 
 handleEvent
     :: (Job -> IO ()) -> BrickEvent Name AppEvent -> EventM Name State ()
 handleEvent launch = \case
+    VtyEvent e
+        | Just t <- reportedTheme e -> modify $ \s -> s{stTheme = t}
     VtyEvent (V.EvKey key mods) -> step $ handleKey key mods
     MouseDown name button _ _ -> case clickOf name button of
         Just c -> step $ handleClick c
@@ -175,6 +203,8 @@ clickOf name = \case
         NotificationRow i -> ClickNotification i
         TabOf v -> ClickTab v
         PickerEntry i -> ClickPicker i
+        FieldOf f -> ClickField f
+        KeyButton k -> ClickKey k
     _ -> Nothing
 
 -- Attributes -------------------------------------------------------
@@ -188,6 +218,8 @@ barAttr
     , selectedAttr
     , dimAttr
     , keyAttr
+    , buttonAttr
+    , buttonKeyAttr
     , titleAttr
     , dangerAttr
     , dangerBorderAttr
@@ -208,6 +240,8 @@ stripeAttr = attrName "stripe"
 selectedAttr = attrName "selected"
 dimAttr = attrName "dim"
 keyAttr = attrName "key"
+buttonAttr = attrName "button"
+buttonKeyAttr = buttonAttr <> attrName "key"
 titleAttr = attrName "title"
 dangerAttr = attrName "danger"
 dangerBorderAttr = attrName "dangerBorder"
@@ -219,39 +253,64 @@ failureAttr = attrName "failure"
 infoAttr = attrName "info"
 busyAttr = attrName "busy"
 
--- | The background of every other table row.
-stripe :: V.Color
-stripe = V.rgbColor (0xff :: Int) 0xff 0xd7
-
--- | The background of the other table rows.
-paper :: V.Color
-paper = V.rgbColor (0xff :: Int) 0xff 0xff
-
-attributes :: AttrMap
-attributes =
-    attrMap
-        V.defAttr
-        [ (barAttr, V.white `on` V.blue `V.withStyle` V.bold)
-        , (tabAttr, fg V.brightBlack)
-        , (tabActiveAttr, V.black `on` V.cyan `V.withStyle` V.bold)
-        , (columnAttr, V.defAttr `V.withStyle` V.bold)
-        , (plainAttr, V.black `on` paper)
-        , (stripeAttr, V.black `on` stripe)
-        , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
-        , (dimAttr, fg $ V.rgbColor (0x5f :: Int) 0x5f 0x5f)
-        , (keyAttr, fg V.blue `V.withStyle` V.bold)
-        , (dialogAttr, V.black `on` V.rgbColor (0xee :: Int) 0xee 0xee)
-        , (borderAttr, fg V.brightBlack)
-        , (dangerBorderAttr, fg V.red)
-        , (focusLabelAttr, fg V.blue `V.withStyle` V.bold)
+-- | The colours of either theme; the terminal's own for everything else.
+attributes :: Theme -> AttrMap
+attributes theme =
+    attrMap V.defAttr $
+        [ (columnAttr, V.defAttr `V.withStyle` V.bold)
         , (titleAttr, V.defAttr `V.withStyle` V.bold)
-        , (dangerAttr, fg V.red `V.withStyle` V.bold)
-        , (inputAttr, V.black `on` V.rgbColor (0xd0 :: Int) 0xd0 0xd0)
-        , (inputFocusAttr, V.black `on` V.white)
-        , (dirAttr, fg V.blue `V.withStyle` V.bold)
-        , (failureAttr, fg V.red `V.withStyle` V.bold)
+        , (dangerBorderAttr, fg V.red)
+        ]
+            <> case theme of
+                Light -> light
+                Dark -> dark
+  where
+    rgb :: Int -> Int -> Int -> V.Color
+    rgb = V.linearColor
+    bold a = a `V.withStyle` V.bold
+    light =
+        [ (barAttr, rgb 0x26 0x32 0x3f `on` rgb 0xe1 0xe8 0xf0)
+        , (tabAttr, fg $ rgb 0x6a 0x6a 0x6a)
+        , (tabActiveAttr, bold $ rgb 0x0b 0x2a 0x40 `on` rgb 0xcf 0xe3 0xf3)
+        , (plainAttr, V.defAttr)
+        , (stripeAttr, V.defAttr `V.withBackColor` rgb 0xf4 0xf5 0xf7)
+        , (selectedAttr, bold $ rgb 0x0b 0x2a 0x40 `on` rgb 0xcf 0xe3 0xf3)
+        , (dimAttr, fg $ rgb 0x6a 0x6a 0x6a)
+        , (keyAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (buttonAttr, rgb 0x0b 0x2a 0x40 `on` rgb 0xdb 0xe8 0xf5)
+        , (buttonKeyAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (dialogAttr, rgb 0x1c 0x1c 0x1c `on` rgb 0xf2 0xf2 0xf4)
+        , (borderAttr, fg $ rgb 0xa0 0xa0 0xa8)
+        , (focusLabelAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (dangerAttr, bold $ fg $ rgb 0xc0 0x1c 0x28)
+        , (inputAttr, rgb 0x1c 0x1c 0x1c `on` rgb 0xe2 0xe2 0xe6)
+        , (inputFocusAttr, rgb 0x00 0x00 0x00 `on` rgb 0xff 0xff 0xff)
+        , (dirAttr, bold $ fg $ rgb 0x1f 0x5f 0xa8)
+        , (failureAttr, bold $ fg $ rgb 0xc0 0x1c 0x28)
+        , (infoAttr, fg $ rgb 0x0e 0x6e 0x8a)
+        , (busyAttr, bold $ fg $ rgb 0x9a 0x67 0x00)
+        ]
+    dark =
+        [ (barAttr, rgb 0xd0 0xd8 0xe0 `on` rgb 0x26 0x2e 0x38)
+        , (tabAttr, fg $ rgb 0x8a 0x8a 0x8a)
+        , (tabActiveAttr, bold $ rgb 0xff 0xff 0xff `on` rgb 0x1f 0x4f 0x6f)
+        , (plainAttr, V.defAttr)
+        , (stripeAttr, V.defAttr `V.withBackColor` rgb 0x2a 0x2a 0x30)
+        , (selectedAttr, bold $ rgb 0xff 0xff 0xff `on` rgb 0x1f 0x4f 0x6f)
+        , (dimAttr, fg $ rgb 0x9a 0x9a 0x9a)
+        , (keyAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
+        , (buttonAttr, rgb 0xff 0xff 0xff `on` rgb 0x2d 0x4a 0x6b)
+        , (buttonKeyAttr, bold $ fg $ rgb 0xaf 0xd7 0xff)
+        , (dialogAttr, rgb 0xe4 0xe4 0xe4 `on` rgb 0x30 0x30 0x36)
+        , (borderAttr, fg $ rgb 0x6c 0x6c 0x6c)
+        , (focusLabelAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
+        , (dangerAttr, bold $ fg V.brightRed)
+        , (inputAttr, rgb 0xe4 0xe4 0xe4 `on` rgb 0x44 0x44 0x4a)
+        , (inputFocusAttr, rgb 0xff 0xff 0xff `on` rgb 0x5a 0x5a 0x64)
+        , (dirAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
+        , (failureAttr, bold $ fg V.brightRed)
+        , (busyAttr, bold $ fg V.brightYellow)
         , (infoAttr, fg V.cyan)
-        , (busyAttr, fg V.yellow `V.withStyle` V.bold)
         ]
 
 -- Layout -----------------------------------------------------------
@@ -492,18 +551,21 @@ field focused label widget =
 formPanel :: Form -> [Text] -> Widget Name
 formPanel form notes =
     panel "Where does the plan come from?" $
-        [ field (focused QrField) "QR image         " $
-            inputOr
+        [ clickable (FieldOf QrField)
+            $ field (focused QrField) "QR image         "
+            $ inputOr
                 "enter to browse, or type a path"
                 (focused QrField)
                 40
                 (formQr form)
         , txt " "
-        , field (focused SmdpField) "SM-DP+ address   " $
-            input (focused SmdpField) 40 (smdpDisplay form)
+        , clickable (FieldOf SmdpField)
+            $ field (focused SmdpField) "SM-DP+ address   "
+            $ input (focused SmdpField) 40 (smdpDisplay form)
         , txt " "
-        , field (focused CodeField) "Activation code  " $
-            input (focused CodeField) 40 (codeDisplay form)
+        , clickable (FieldOf CodeField)
+            $ field (focused CodeField) "Activation code  "
+            $ input (focused CodeField) 40 (codeDisplay form)
         , txt " "
         ]
             <> map (withAttr dimAttr . txt) notes
@@ -587,16 +649,37 @@ bottomLine s =
         Just (c, rest) -> T.cons (toUpper c) rest
         Nothing -> t
 
--- | Key hints on one line.
+{- | Key hints on one line. A hint naming a key is a button: a
+click on it presses the key.
+-}
 hints :: [(Text, Text)] -> Widget Name
 hints = hBox . zipWith hint [0 :: Int ..]
   where
     hint i (k, d) =
         hBox
             [ txt $ if i == 0 then "" else "   "
-            , withAttr keyAttr $ txt k
-            , txt $ " " <> d
+            , case keyOf k of
+                Just key ->
+                    clickable (KeyButton key)
+                        $ withAttr buttonAttr
+                        $ hBox
+                            [ txt " "
+                            , withAttr buttonKeyAttr $ txt k
+                            , txt $ " " <> d <> " "
+                            ]
+                Nothing -> hBox [withAttr keyAttr $ txt k, txt $ " " <> d]
             ]
+
+-- | The key a hint names, if it names one.
+keyOf :: Text -> Maybe V.Key
+keyOf = \case
+    "enter" -> Just V.KEnter
+    "esc" -> Just V.KEsc
+    "⌫" -> Just V.KBS
+    "tab" -> Just $ V.KChar '\t'
+    "any key" -> Just V.KEsc
+    t | [c] <- T.unpack t -> Just $ V.KChar c
+    _ -> Nothing
 
 -- | The keys that act in the current state.
 keysFor :: State -> [(Text, Text)]
@@ -629,6 +712,7 @@ keysFor s
             , ("D", "delete it (disabled profiles only)")
             , ("n", "pending notifications")
             , ("r", "read the card again")
+            , ("t", "light or dark colours")
             , ("q", "quit")
             ]
         NotificationsView ->
@@ -637,6 +721,7 @@ keysFor s
             , ("a", "send them all")
             , ("p  esc", "back to the profiles")
             , ("r", "read the card again")
+            , ("t", "light or dark colours")
             , ("q", "quit")
             ]
         _ ->
@@ -690,19 +775,15 @@ browserLayer s = case stBrowser s of
   where
     entry selected i (isDir, name) =
         clickable (PickerEntry i)
-            $ withAttr (attrFor selected i isDir name)
+            $ withAttr (attrFor selected i isDir)
             $ padRight Max
             $ txt
             $ (if selected then "› " else "  ")
                 <> (if isDir then name <> "/" else name)
-    attrFor selected i isDir name
+    attrFor selected i isDir
         | selected = selectedAttr
         | isDir = dirAttr
-        | isImage name = rowAttr False i
-        | otherwise = dimAttr
-    isImage name =
-        map toLower (takeExtension $ T.unpack name)
-            `elem` [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]
+        | otherwise = rowAttr False i
     ellipsisLeft n p
         | length p <= n = p
         | otherwise = "…" <> reverse (take (n - 1) $ reverse p)

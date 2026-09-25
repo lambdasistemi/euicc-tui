@@ -64,6 +64,7 @@ library
     Euicc.Qr
     Euicc.Ui.App
     Euicc.Ui.State
+    Euicc.Ui.Theme
 
   build-depends:
     , aeson              >=2.1    && <2.3
@@ -74,6 +75,7 @@ library
     , filepath           >=1.4    && <1.6
     , text               >=2.0    && <2.2
     , typed-process      >=0.2.11 && <0.3
+    , unix               >=2.8    && <2.9
     , vty                >=6.0    && <6.6
     , vty-crossplatform  >=0.4    && <0.6
 
@@ -98,6 +100,7 @@ test-suite unit-tests
     Euicc.Lpac.OutputSpec
     Euicc.QrSpec
     Euicc.Ui.StateSpec
+    Euicc.Ui.ThemeSpec
     Fixtures
 
   ghc-options:        -threaded
@@ -105,8 +108,11 @@ test-suite unit-tests
   build-depends:
     , base        >=4.18 && <5
     , bytestring  >=0.11 && <0.13
+    , directory   >=1.3  && <2
     , euicc-tui
+    , filepath    >=1.4  && <1.6
     , hspec       >=2.10 && <2.12
     , QuickCheck  >=2.14 && <2.17
     , text        >=2.0  && <2.2
+    , time        >=1.9  && <1.16
     , vty         >=6.0  && <6.6

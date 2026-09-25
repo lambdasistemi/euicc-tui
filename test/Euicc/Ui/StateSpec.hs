@@ -39,6 +39,7 @@ import Euicc.Ui.State
     , smdpDisplay
     , start
     )
+import Euicc.Ui.Theme (Theme (..))
 import Fixtures (fixtureOk)
 import Graphics.Vty (Key (..))
 import Test.Hspec
@@ -274,6 +275,18 @@ spec = do
             let (s1, _) = pressAll [KChar 'd', KChar '?'] s0
             stHelp s1 `shouldBe` True
             formSmdp (stForm s1) `shouldBe` ""
+    describe "theme" $ do
+        it "toggles on t in the profile list" $ do
+            s0 <- loaded
+            let (s1, j) = press (KChar 't') s0
+            j `shouldBe` Nothing
+            stTheme s1 `shouldBe` Light
+            stTheme (fst $ press (KChar 't') s1) `shouldBe` Dark
+        it "types t as text in a form" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'd', KChar 't'] s0
+            stTheme s1 `shouldBe` stTheme s0
+            formSmdp (stForm s1) `shouldBe` "t"
     describe "mouse" $ do
         let click c s = case handleClick c s of
                 Continue s' j -> (s', j)
@@ -321,6 +334,31 @@ spec = do
             s0 <- loaded
             let (s1, _) = click WheelDown s0
             stProfileCursor s1 `shouldBe` 1
+        it "enables on a click over the dialog's y button" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'e'] s0
+                (s2, j) = click (ClickKey (KChar 'y')) s1
+            stConfirm s2 `shouldBe` Nothing
+            j `shouldSatisfy` \case
+                Just (Enable _) -> True
+                _ -> False
+        it "closes the delete dialog on a click over esc" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'D'] s0
+                (s2, j) = click (ClickKey KEsc) s1
+            j `shouldBe` Nothing
+            fst <$> stDelete s2 `shouldBe` Nothing
+        it "focuses a form field on click" $ do
+            s0 <- loaded
+            let (s1, _) = press (KChar 'd') s0
+                (s2, j) = click (ClickField CodeField) s1
+            j `shouldBe` Nothing
+            formFocus (stForm s2) `shouldBe` CodeField
+        it "browses on a click over the focused QR field" $ do
+            s0 <- loaded
+            let (s1, _) = press (KChar 'g') s0
+                (_, j) = click (ClickField QrField) s1
+            j `shouldBe` Just (ReadDir ".")
         it "picks a QR image on a click over the selected entry" $ do
             s0 <- atListing
             let (s1, j1) = click (ClickPicker 1) s0
