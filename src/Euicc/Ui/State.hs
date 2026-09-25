@@ -9,6 +9,7 @@ module Euicc.Ui.State
     , WizardPhase (..)
     , Browser (..)
     , confirmDisplay
+    , deleteCheck
     , emptyForm
 
       -- * Transitions
@@ -36,7 +37,8 @@ module Euicc.Ui.State
 -- without hardware.
 --
 -- While a job runs the state is busy and no further job is started.
--- There is no key that deletes or disables a profile.
+-- There is no key that disables a profile. Deleting takes @D@ on a
+-- disabled profile and the last digits of its ICCID typed back.
 import Control.Applicative ((<|>))
 
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -166,6 +168,10 @@ data State = State
     -- ^ a profile waiting for y/n before being enabled
     , stNicknameEdit :: Maybe (Profile, Text)
     -- ^ a profile waiting for a nickname to be typed
+    , stDelete :: Maybe (Profile, Text)
+    {- ^ a profile waiting for the last digits of its ICCID before
+    being deleted
+    -}
     , stWizard :: Maybe Wizard
     -- ^ a guided install in progress
     , stBrowser :: Maybe Browser
@@ -195,6 +201,7 @@ start =
         , stForm = emptyForm
         , stConfirm = Nothing
         , stNicknameEdit = Nothing
+        , stDelete = Nothing
         , stWizard = Nothing
         , stBrowser = Nothing
         , stBusy = Just Refresh
@@ -208,6 +215,7 @@ handleKey :: Key -> [Modifier] -> State -> Step
 handleKey key mods s
     | key == KChar 'c' && MCtrl `elem` mods = Halt
     | Just b <- stBrowser s = browsing b
+    | Just (p, t) <- stDelete s = deleting p t
     | Just (p, t) <- stNicknameEdit s = nicknaming p t
     | Just p <- stConfirm s = confirming p
     | otherwise = case stView s of
@@ -257,6 +265,33 @@ handleKey key mods s
         _ -> continue s
       where
         cancelNickname = continue s{stNicknameEdit = Nothing}
+    deleting p t = case key of
+        KEnter
+            | T.strip t == deleteCheck p ->
+                launch (Delete p) s{stDelete = Nothing}
+            | otherwise -> cancelDelete
+        KEsc -> cancelDelete
+        KBS -> continue s{stDelete = Just (p, T.dropEnd 1 t)}
+        KChar c -> continue s{stDelete = Just (p, T.snoc t c)}
+        _ -> continue s
+      where
+        cancelDelete =
+            continue
+                s{stDelete = Nothing, stStatus = Just $ Info "Not deleted."}
+    askDelete = case selectedProfile s of
+        Nothing -> continue s
+        Just p
+            | profileState p == Enabled ->
+                continue
+                    s
+                        { stStatus =
+                            Just
+                                $ Info
+                                $ profileLabel p
+                                    <> " is enabled; enable another \
+                                       \plan before deleting it."
+                        }
+            | otherwise -> continue s{stDelete = Just (p, "")}
     confirming p = case key of
         KChar 'y' -> launch (Enable p) s{stConfirm = Nothing}
         _ ->
@@ -273,6 +308,7 @@ handleKey key mods s
         KChar 'n' -> switchTo NotificationsView
         KChar 'd' -> switchTo DownloadView
         KChar 'g' -> openWizard
+        KChar 'D' -> askDelete
         KChar 'm' -> case selectedProfile s of
             Nothing -> continue s
             Just p ->
@@ -646,3 +682,9 @@ confirmed flag target =
         { targetConfirmationRequired =
             flag || targetConfirmationRequired target
         }
+
+{- | What must be typed to delete a profile: the last four digits of
+its ICCID.
+-}
+deleteCheck :: Profile -> Text
+deleteCheck = T.takeEnd 4 . profileIccid

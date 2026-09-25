@@ -31,6 +31,7 @@ genCommand =
         [ pure ReadChipInfo
         , pure ListProfiles
         , pure $ EnableProfile "8944476500001234567"
+        , pure $ DeleteProfile "8944476500001234567"
         , NicknameProfile "8944476500001234567" <$> genNickname
         , pure ListNotifications
         , ProcessNotifications <$> listOf (choose (0, 1000))
@@ -55,6 +56,9 @@ spec = do
         it "enables by ICCID" $
             commandArgs (EnableProfile "894")
                 `shouldBe` ["profile", "enable", "894"]
+        it "deletes by ICCID" $
+            commandArgs (DeleteProfile "894")
+                `shouldBe` ["profile", "delete", "894"]
         it "lists notifications" $
             commandArgs ListNotifications
                 `shouldBe` ["notification", "list"]
@@ -88,14 +92,18 @@ spec = do
         it "nicknames a profile by ICCID" $
             commandArgs (NicknameProfile "894" "holiday")
                 `shouldBe` ["profile", "nickname", "894", "holiday"]
-        it "never deletes, disables or removes without sending" $
+        it "never disables or removes without sending; deletes only by ICCID" $
             property $
                 forAll genCommand $ \c ->
                     let verbs = take 2 $ commandArgs c
+                        isDelete = case c of
+                            DeleteProfile _ -> True
+                            _ -> False
                     in  length verbs == 2
                             && all
                                 (`notElem` verbs)
-                                ["delete", "disable", "remove", "purge"]
+                                ["disable", "remove", "purge"]
+                            && (("delete" `elem` verbs) == isDelete)
         it "never shows the matching ID" $
             show download `shouldSatisfy` (not . isInfixOf "X-1")
     describe "lpacEnvironment" $ do

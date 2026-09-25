@@ -11,7 +11,7 @@ module Euicc.Lpac.Command
 -- License     : Apache-2.0
 --
 -- The closed set of @lpac@ commands the UI can issue. There is no
--- constructor for deleting or disabling a profile, nor for removing a
+-- constructor for disabling a profile, nor for removing a
 -- notification without sending it: those operations cannot be
 -- expressed.
 
@@ -29,6 +29,8 @@ data Command
     | ListProfiles
     | -- | enable the profile with this ICCID
       EnableProfile Text
+    | -- | delete the profile with this ICCID; the UI guards it
+      DeleteProfile Text
     | -- | give the profile with this ICCID a nickname
       NicknameProfile Text Text
     | ListNotifications
@@ -48,6 +50,7 @@ commandArgs = \case
     ReadChipInfo -> ["chip", "info"]
     ListProfiles -> ["profile", "list"]
     EnableProfile iccid -> ["profile", "enable", T.unpack iccid]
+    DeleteProfile iccid -> ["profile", "delete", T.unpack iccid]
     NicknameProfile iccid nickname ->
         ["profile", "nickname", T.unpack iccid, T.unpack nickname]
     ListNotifications -> ["notification", "list"]

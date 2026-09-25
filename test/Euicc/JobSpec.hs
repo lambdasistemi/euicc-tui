@@ -150,6 +150,21 @@ spec = do
                 `shouldBe` Left (LpacError "es9p_handle_notification" "")
             fmap (length . snapProfiles) (snapOf r)
                 `shouldBe` Right 2
+    describe "Delete" $ do
+        it "deletes by ICCID, then reloads" $ do
+            p <- disabledProfile
+            (r, cmds) <-
+                runRecorded
+                    ( \case
+                        DeleteProfile _ ->
+                            Just $ fixtureOk "profile-delete-ok"
+                        _ -> Nothing
+                    )
+                    (Delete p)
+            cmds `shouldBe` DeleteProfile (profileIccid p) : reads'
+            resultOutcome r `shouldSatisfy` \case
+                Right t -> ("Deleted " <> profileLabel p) `T.isPrefixOf` t
+                _ -> False
     describe "Nickname" $ do
         it "nicknames by ICCID, then reloads" $ do
             p <- disabledProfile

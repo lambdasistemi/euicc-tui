@@ -25,9 +25,11 @@ so profiles can be inspected and switched without remembering ICCIDs.
   for a confirmation code (GSMA `LPA:1$...$...$1`) are handled here:
   the code is asked for, masked, and passed to `lpac -c`.
 - **Refresh** the card state at any time.
-
-There is **no delete action**. Profiles can only be removed with
-another tool.
+- **Delete** (`D`) a disabled profile, guarded: the enabled profile is
+  refused, and the delete runs only after the last four digits of the
+  ICCID are typed back. Deleting is permanent; the purchase QR usually
+  cannot install the plan again. Send the resulting notification
+  (`n`, `a`) while online.
 
 ## Install and run
 
@@ -47,7 +49,8 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
 | View | Keys |
 |---|---|
-| Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `r` refresh, `q` quit |
+| Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `D` delete, `r` refresh, `q` quit |
+| Delete | type the last four ICCID digits, enter deletes if they match (anything else cancels), esc cancel |
 | Confirmation | `y` enable, `n`/esc cancel |
 | Nickname | type, enter set, esc cancel |
 | Notifications | up/down select, `s` send selected, `a` send all, `p`/esc back, `r` refresh, `q` quit |
@@ -60,9 +63,11 @@ refused; the screen keeps responding.
 
 ## Safety rules
 
-- **No delete.** The program has no way to delete or disable a
-  profile: the set of `lpac` commands it can issue does not contain
-  them.
+- **Delete is guarded, disable does not exist.** Only a disabled
+  profile can be deleted, and only after its ICCID's last four digits
+  are typed back; a wrong guess cancels. No key disables a profile:
+  the set of `lpac` commands the program can issue does not contain
+  it.
 - **Switching works offline.** Enabling a profile is a card-local
   operation; no network is needed. It can be checked with
   `unshare -rn euicc-tui`.

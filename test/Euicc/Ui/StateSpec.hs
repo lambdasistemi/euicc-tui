@@ -165,7 +165,7 @@ genKey :: Gen Key
 genKey =
     elements $
         [KEnter, KEsc, KUp, KDown, KBS, KChar '\t']
-            <> map KChar "abcdeijkmnpqrsxygzDLPA:1$.-"
+            <> map KChar "abcdeijkmnpqrsxygzDLPA:01$.-"
 
 spec :: Spec
 spec = do
@@ -211,6 +211,49 @@ spec = do
         it "quits on q" $ do
             s0 <- loaded
             handleKey (KChar 'q') [] s0 `shouldBe` Halt
+    describe "delete" $ do
+        it "refuses the enabled profile" $ do
+            s0 <- loaded
+            let (s1, js) = pressAll [KChar 'D'] s0
+            js `shouldBe` []
+            stDelete s1 `shouldBe` Nothing
+            stStatus s1 `shouldSatisfy` \case
+                Just (Info _) -> True
+                _ -> False
+        it "asks for the ICCID's last digits on a disabled profile" $ do
+            s0 <- loaded
+            let (s1, js) = pressAll [KDown, KChar 'D'] s0
+            js `shouldBe` []
+            fmap (profileIccid . fst) (stDelete s1)
+                `shouldBe` Just "8939100000000000001"
+        it "deletes when the digits match" $ do
+            s0 <- loaded
+            let (s1, js) =
+                    pressAll ([KDown, KChar 'D'] <> typeText "0001" <> [KEnter]) s0
+            js `shouldSatisfy` \case
+                [Delete p] -> profileIccid p == "8939100000000000001"
+                _ -> False
+            stDelete s1 `shouldBe` Nothing
+        it "does not delete when the digits differ" $ do
+            s0 <- loaded
+            let (s1, js) =
+                    pressAll ([KDown, KChar 'D'] <> typeText "0002" <> [KEnter]) s0
+            js `shouldBe` []
+            stDelete s1 `shouldBe` Nothing
+        it "does not delete on Enter alone" $ do
+            s0 <- loaded
+            let (_, js) = pressAll [KDown, KChar 'D', KEnter] s0
+            js `shouldBe` []
+        it "cancels on Esc" $ do
+            s0 <- loaded
+            let (s1, js) =
+                    pressAll ([KDown, KChar 'D'] <> typeText "0001" <> [KEsc]) s0
+            js `shouldBe` []
+            stDelete s1 `shouldBe` Nothing
+        it "treats y as a digit guess, not a confirmation" $ do
+            s0 <- loaded
+            let (_, js) = pressAll [KDown, KChar 'D', KChar 'y', KEnter] s0
+            js `shouldBe` []
     describe "busy" $ do
         it "starts no job while one is running" $ do
             s0 <- loaded
@@ -653,6 +696,7 @@ spec = do
                                     in  (done, ok && all (allowed k) j)
                             allowed k = \case
                                 Enable _ -> k == KChar 'y'
+                                Delete _ -> k == KEnter
                                 Download _ _ -> k == KEnter
                                 DecodeQr _ -> k == KEnter
                                 Nickname _ _ -> k == KEnter

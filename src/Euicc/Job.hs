@@ -59,6 +59,8 @@ data Job
       Refresh
     | -- | enable the given profile
       Enable Profile
+    | -- | delete the given profile, which must be disabled
+      Delete Profile
     | -- | give the given profile a nickname
       Nickname Profile Text
     | -- | send these notifications
@@ -118,6 +120,7 @@ jobLabel :: Job -> Text
 jobLabel = \case
     Refresh -> "reading the card"
     Enable p -> "enabling " <> profileLabel p
+    Delete p -> "deleting " <> profileLabel p
     Nickname p _ -> "naming " <> profileLabel p
     SendNotifications [_] -> "sending 1 notification"
     SendNotifications ns ->
@@ -199,6 +202,14 @@ runJob runner job = case job of
         Enable p ->
             done ("Enabled " <> profileLabel p <> ".")
                 $ EnableProfile
+                $ profileIccid p
+        Delete p ->
+            done
+                ( "Deleted "
+                    <> profileLabel p
+                    <> ". Send its notification online: n, then a."
+                )
+                $ DeleteProfile
                 $ profileIccid p
         Nickname p nickname ->
             done ("Named " <> profileLabel p <> ".") $

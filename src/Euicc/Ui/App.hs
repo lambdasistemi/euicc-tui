@@ -79,6 +79,7 @@ import Euicc.Ui.State
     , WizardPhase (..)
     , codeDisplay
     , confirmDisplay
+    , deleteCheck
     , finishJob
     , handleKey
     , smdpDisplay
@@ -152,7 +153,7 @@ attributes =
 -- Drawing ----------------------------------------------------------
 
 draw :: State -> [Widget ()]
-draw s = [browserLayer s, confirmLayer s, mainLayer s]
+draw s = [browserLayer s, deleteLayer s, confirmLayer s, mainLayer s]
 
 mainLayer :: State -> Widget ()
 mainLayer s =
@@ -369,7 +370,7 @@ helpLine :: State -> Widget ()
 helpLine s = padLeftRight 1 $ str $ case stView s of
     ProfilesView ->
         "up/down select  e enable  m nickname  n notifications  \
-        \d download  g guided install  r refresh  q quit"
+        \d download  g guided install  D delete  r refresh  q quit"
     NotificationsView ->
         "up/down select  s send selected  a send all  p profiles  \
         \r refresh  q quit"
@@ -441,5 +442,37 @@ nicknameLayer s = case stNicknameEdit s of
                     $ if T.null t then " " else t
                 , txt " "
                 , hCenter $ txt "enter sets, esc cancels, empty clears the field"
+                , txt " "
+                ]
+
+deleteLayer :: State -> Widget ()
+deleteLayer s = case stDelete s of
+    Nothing -> emptyWidget
+    Just (p, t) ->
+        centerLayer
+            $ borderWithLabel (withAttr failureAttr $ txt " Delete profile ")
+            $ padLeftRight 2
+            $ vBox
+                [ txt " "
+                , hCenter $ txt $ profileLabel p
+                , hCenter $ txt $ profileIccid p
+                , txt " "
+                , withAttr failureAttr $
+                    txt "Deleting is permanent. The plan is gone from the card"
+                , withAttr failureAttr $
+                    txt "and its QR code usually cannot install it again."
+                , txt " "
+                , hCenter
+                    $ txt
+                    $ "Type the last "
+                        <> T.pack (show $ T.length $ deleteCheck p)
+                        <> " digits of the ICCID to delete it:"
+                , hCenter
+                    $ hLimit 10
+                    $ padRight Max
+                    $ txt
+                    $ if T.null t then " " else t
+                , txt " "
+                , hCenter $ txt "enter deletes if they match, esc cancels"
                 , txt " "
                 ]
