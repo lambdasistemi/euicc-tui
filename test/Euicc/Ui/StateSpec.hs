@@ -172,7 +172,7 @@ genKey :: Gen Key
 genKey =
     elements $
         [KEnter, KEsc, KUp, KDown, KBS, KChar '\t']
-            <> map KChar "abcdeijknpqrsxyzDLPA:1$.-"
+            <> map KChar "abcdeijkmnpqrsxygzDLPA:1$.-"
 
 spec :: Spec
 spec = do
@@ -515,6 +515,42 @@ spec = do
             stStatus s3 `shouldSatisfy` \case
                 Just (Failure _) -> True
                 _ -> False
+    describe "nickname" $ do
+        it "edits the selected profile's nickname on m" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'm'] s0
+            stNicknameEdit s1
+                `shouldSatisfy` \case
+                    Just (p, "") -> profileIccid p == "8939100000000000001"
+                    _ -> False
+        it "starts from the existing nickname" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'm'] s0
+            stNicknameEdit s1
+                `shouldSatisfy` \case
+                    Just (p, "travel") -> profileIccid p == "8944476500001234567"
+                    _ -> False
+        it "sets the nickname on Enter" $ do
+            s0 <- loaded
+            let (s1, js) =
+                    pressAll
+                        ([KDown, KChar 'm'] <> typeText "holiday" <> [KEnter])
+                        s0
+            js `shouldSatisfy` \case
+                [Nickname p "holiday"] ->
+                    profileIccid p == "8939100000000000001"
+                _ -> False
+            stNicknameEdit s1 `shouldBe` Nothing
+        it "types and backspaces" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'm'] s0
+                (s2, _) = pressAll (typeText "ab" <> [KBS]) s1
+            stNicknameEdit s2 `shouldBe` fmap (\p -> (p, "a")) (selectedProfile s2)
+        it "cancels on Esc" $ do
+            s0 <- loaded
+            let (s1, js) = pressAll [KDown, KChar 'm', KEsc] s0
+            js `shouldBe` []
+            stNicknameEdit s1 `shouldBe` Nothing
     describe "download form" $ do
         it "downloads from typed address and code" $ do
             s0 <- loaded
@@ -591,7 +627,7 @@ spec = do
             formCode (stForm s1) `shouldBe` ""
     beforeAll ((,) <$> loaded <*> loadedSnapshot) $
         describe "safety" $
-            it "enables only on y and downloads only on Enter" $
+            it "enables only on y; downloads, decodes and names only on Enter" $
                 \(s0, snap) ->
                     property $ forAll (listOf genKey) $ \ks ->
                         let step (s, ok) k = case handleKey k [] s of
@@ -610,6 +646,8 @@ spec = do
                             allowed k = \case
                                 Enable _ -> k == KChar 'y'
                                 Download _ _ -> k == KEnter
+                                DecodeQr _ -> k == KEnter
+                                Nickname _ _ -> k == KEnter
                                 _ -> True
                         in  snd $ foldl' step (s0, True) ks
   where

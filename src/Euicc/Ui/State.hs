@@ -37,7 +37,7 @@ module Euicc.Ui.State
 -- While a job runs the state is busy and no further job is started.
 -- There is no key that deletes or disables a profile.
 
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Euicc.ActivationCode
@@ -151,6 +151,8 @@ data State = State
     , stForm :: Form
     , stConfirm :: Maybe Profile
     -- ^ a profile waiting for y/n before being enabled
+    , stNicknameEdit :: Maybe (Profile, Text)
+    -- ^ a profile waiting for a nickname to be typed
     , stWizard :: Maybe Wizard
     -- ^ a guided install in progress
     , stBusy :: Maybe Job
@@ -177,6 +179,7 @@ start =
         , stNotificationCursor = 0
         , stForm = emptyForm
         , stConfirm = Nothing
+        , stNicknameEdit = Nothing
         , stWizard = Nothing
         , stBusy = Just Refresh
         , stStatus = Nothing
@@ -188,6 +191,7 @@ start =
 handleKey :: Key -> [Modifier] -> State -> Step
 handleKey key mods s
     | key == KChar 'c' && MCtrl `elem` mods = Halt
+    | Just (p, t) <- stNicknameEdit s = nicknaming p t
     | Just p <- stConfirm s = confirming p
     | otherwise = case stView s of
         ProfilesView -> profiles
@@ -196,6 +200,17 @@ handleKey key mods s
         WizardView -> wizard
   where
     continue s' = Continue s' Nothing
+    nicknaming p t = case key of
+        KEnter
+            | T.null (T.strip t) -> cancelNickname
+            | otherwise ->
+                launch (Nickname p (T.strip t)) s{stNicknameEdit = Nothing}
+        KEsc -> cancelNickname
+        KBS -> continue s{stNicknameEdit = Just (p, T.dropEnd 1 t)}
+        KChar c -> continue s{stNicknameEdit = Just (p, T.snoc t c)}
+        _ -> continue s
+      where
+        cancelNickname = continue s{stNicknameEdit = Nothing}
     confirming p = case key of
         KChar 'y' -> launch (Enable p) s{stConfirm = Nothing}
         _ ->
@@ -212,6 +227,14 @@ handleKey key mods s
         KChar 'n' -> switchTo NotificationsView
         KChar 'd' -> switchTo DownloadView
         KChar 'g' -> openWizard
+        KChar 'm' -> case selectedProfile s of
+            Nothing -> continue s
+            Just p ->
+                continue
+                    s
+                        { stNicknameEdit =
+                            Just (p, fromMaybe "" $ profileNickname p)
+                        }
         _ -> continue s
     notifications = case key of
         KChar 'q' -> Halt
