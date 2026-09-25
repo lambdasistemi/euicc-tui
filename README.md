@@ -49,6 +49,9 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
 Press `?` for the keys of the current screen.
 
+The colours follow the terminal's background, light or dark, as the
+terminal reports it; `EUICC_TUI_THEME=light` or `dark` overrides.
+
 The mouse works too: a click selects a row, a tab or a picker entry;
 a click on the selected profile asks to enable it, and on the selected
 picker entry picks it. A click on a key hint, such as `y enable` or

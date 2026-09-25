@@ -98,6 +98,7 @@ import Euicc.Ui.State
     , start
     , typing
     )
+import Euicc.Ui.Theme (Theme (..), detectTheme)
 import Graphics.Vty qualified as V
 import Graphics.Vty.CrossPlatform (mkVty)
 import System.FilePath (takeExtension)
@@ -122,19 +123,20 @@ runApp runner = do
     let launch job =
             void $ forkIO $ runJob runner job >>= writeBChan chan . JobDone
         (s0, j0) = start
+    theme <- detectTheme
     launch j0
     let buildVty = mkVty V.defaultConfig
     vty <- buildVty
-    void $ customMain vty buildVty (Just chan) (app launch) s0
+    void $ customMain vty buildVty (Just chan) (app theme launch) s0
 
-app :: (Job -> IO ()) -> App State AppEvent Name
-app launch =
+app :: Theme -> (Job -> IO ()) -> App State AppEvent Name
+app theme launch =
     App
         { appDraw = draw
         , appChooseCursor = neverShowCursor
         , appHandleEvent = handleEvent launch
         , appStartEvent = enableMouse
-        , appAttrMap = const attributes
+        , appAttrMap = const $ attributes theme
         }
 
 -- | Ask the terminal for mouse events, when it can report them.
@@ -227,45 +229,63 @@ failureAttr = attrName "failure"
 infoAttr = attrName "info"
 busyAttr = attrName "busy"
 
--- | The background of every other table row.
-stripe :: V.Color
-stripe = V.rgbColor (0xff :: Int) 0xff 0xd7
-
--- | The background of the selected row and the active tab.
-selection :: V.Color
-selection = V.rgbColor (0xaf :: Int) 0xff 0xff
-
--- | The background of the other table rows.
-paper :: V.Color
-paper = V.rgbColor (0xff :: Int) 0xff 0xff
-
-attributes :: AttrMap
-attributes =
-    attrMap
-        V.defAttr
-        [ (barAttr, V.white `on` V.blue `V.withStyle` V.bold)
-        , (tabAttr, fg V.brightBlack)
-        , (tabActiveAttr, V.black `on` selection `V.withStyle` V.bold)
-        , (columnAttr, V.defAttr `V.withStyle` V.bold)
-        , (plainAttr, V.black `on` paper)
-        , (stripeAttr, V.black `on` stripe)
-        , (selectedAttr, V.black `on` selection `V.withStyle` V.bold)
-        , (dimAttr, fg $ V.rgbColor (0x5f :: Int) 0x5f 0x5f)
-        , (keyAttr, fg V.blue `V.withStyle` V.bold)
-        , (buttonAttr, V.black `on` V.rgbColor (0xaf :: Int) 0xd7 0xff)
-        , (buttonKeyAttr, fg V.blue `V.withStyle` V.bold)
-        , (dialogAttr, V.black `on` V.rgbColor (0xee :: Int) 0xee 0xee)
-        , (borderAttr, fg V.brightBlack)
-        , (dangerBorderAttr, fg V.red)
-        , (focusLabelAttr, fg V.blue `V.withStyle` V.bold)
+-- | The colours of either theme; the terminal's own for everything else.
+attributes :: Theme -> AttrMap
+attributes theme =
+    attrMap V.defAttr $
+        [ (columnAttr, V.defAttr `V.withStyle` V.bold)
         , (titleAttr, V.defAttr `V.withStyle` V.bold)
-        , (dangerAttr, fg V.red `V.withStyle` V.bold)
-        , (inputAttr, V.black `on` V.rgbColor (0xd0 :: Int) 0xd0 0xd0)
-        , (inputFocusAttr, V.black `on` V.white)
-        , (dirAttr, fg V.blue `V.withStyle` V.bold)
-        , (failureAttr, fg V.red `V.withStyle` V.bold)
+        , (dangerBorderAttr, fg V.red)
         , (infoAttr, fg V.cyan)
-        , (busyAttr, fg V.yellow `V.withStyle` V.bold)
+        ]
+            <> case theme of
+                Light -> light
+                Dark -> dark
+  where
+    rgb :: Int -> Int -> Int -> V.Color
+    rgb = V.linearColor
+    bold a = a `V.withStyle` V.bold
+    light =
+        [ (barAttr, rgb 0x26 0x32 0x3f `on` rgb 0xe1 0xe8 0xf0)
+        , (tabAttr, fg V.brightBlack)
+        , (tabActiveAttr, bold (V.black `on` rgb 0xaf 0xff 0xff))
+        , (plainAttr, V.black `on` rgb 0xff 0xff 0xff)
+        , (stripeAttr, V.black `on` rgb 0xff 0xff 0xd7)
+        , (selectedAttr, bold (V.black `on` rgb 0xaf 0xff 0xff))
+        , (dimAttr, fg $ rgb 0x5f 0x5f 0x5f)
+        , (keyAttr, bold $ fg V.blue)
+        , (buttonAttr, V.black `on` rgb 0xaf 0xd7 0xff)
+        , (buttonKeyAttr, bold $ fg V.blue)
+        , (dialogAttr, V.black `on` rgb 0xee 0xee 0xee)
+        , (borderAttr, fg V.brightBlack)
+        , (focusLabelAttr, bold $ fg V.blue)
+        , (dangerAttr, bold $ fg V.red)
+        , (inputAttr, V.black `on` rgb 0xd0 0xd0 0xd0)
+        , (inputFocusAttr, V.black `on` V.white)
+        , (dirAttr, bold $ fg V.blue)
+        , (failureAttr, bold $ fg V.red)
+        , (busyAttr, bold $ fg V.yellow)
+        ]
+    dark =
+        [ (barAttr, rgb 0xd0 0xd8 0xe0 `on` rgb 0x26 0x2e 0x38)
+        , (tabAttr, fg $ rgb 0x8a 0x8a 0x8a)
+        , (tabActiveAttr, bold $ rgb 0xff 0xff 0xff `on` rgb 0x1f 0x4f 0x6f)
+        , (plainAttr, V.defAttr)
+        , (stripeAttr, V.defAttr `V.withBackColor` rgb 0x2a 0x2a 0x30)
+        , (selectedAttr, bold $ rgb 0xff 0xff 0xff `on` rgb 0x1f 0x4f 0x6f)
+        , (dimAttr, fg $ rgb 0x9a 0x9a 0x9a)
+        , (keyAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
+        , (buttonAttr, rgb 0xff 0xff 0xff `on` rgb 0x2d 0x4a 0x6b)
+        , (buttonKeyAttr, bold $ fg $ rgb 0xaf 0xd7 0xff)
+        , (dialogAttr, rgb 0xe4 0xe4 0xe4 `on` rgb 0x30 0x30 0x36)
+        , (borderAttr, fg $ rgb 0x6c 0x6c 0x6c)
+        , (focusLabelAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
+        , (dangerAttr, bold $ fg V.brightRed)
+        , (inputAttr, rgb 0xe4 0xe4 0xe4 `on` rgb 0x44 0x44 0x4a)
+        , (inputFocusAttr, rgb 0xff 0xff 0xff `on` rgb 0x5a 0x5a 0x64)
+        , (dirAttr, bold $ fg $ rgb 0x87 0xaf 0xff)
+        , (failureAttr, bold $ fg V.brightRed)
+        , (busyAttr, bold $ fg V.brightYellow)
         ]
 
 -- Layout -----------------------------------------------------------
