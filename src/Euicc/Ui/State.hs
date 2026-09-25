@@ -43,6 +43,7 @@ import Data.Text qualified as T
 import Euicc.ActivationCode
     ( DownloadTarget (..)
     , mask
+    , mkSecret
     , resolveDownloadInput
     , revealSecret
     )
@@ -266,9 +267,56 @@ handleKey key mods s
             _ -> continue s
         WzConfirm -> case key of
             KEsc -> closeWizard s
+            KBS -> continue s{stWizard = fmap editConfirm $ stWizard s}
+            KChar c ->
+                continue s{stWizard = fmap (`snocConfirm` c) $ stWizard s}
+            KEnter
+                | T.null (T.strip $ wzConfirmInput $ wizardOf s) ->
+                    continue
+                        s{stStatus = Just $ Info "Type the confirmation code."}
+                | otherwise ->
+                    case
+                        resolveDownloadInput
+                            (formSmdp $ stForm s)
+                            (formCode $ stForm s)
+                        of
+                        Left err -> continue s{stStatus = Just $ Failure err}
+                        Right target ->
+                            launch
+                                ( Download target
+                                    $ Just
+                                    $ mkSecret
+                                    $ T.strip
+                                    $ wzConfirmInput
+                                    $ wizardOf s
+                                )
+                                s
+                                    { stForm = emptyForm
+                                    , stWizard =
+                                        fmap
+                                            (\w -> w{wzConfirmInput = ""})
+                                            $ stWizard s
+                                    }
             _ -> continue s
         WzNickname -> case key of
-            KEsc -> closeWizard s
+            KEnter
+                | T.null (T.strip $ wzNicknameInput $ wizardOf s) -> toEnableAsk
+                | otherwise -> case wzNew $ wizardOf s of
+                    Nothing -> toEnableAsk
+                    Just p ->
+                        launch
+                            (Nickname p (T.strip $ wzNicknameInput $ wizardOf s))
+                            s
+                                { stWizard =
+                                    fmap
+                                        (\w -> w{wzNicknameInput = ""})
+                                        $ stWizard s
+                                }
+            KEsc -> toEnableAsk
+            KBS ->
+                continue s{stWizard = fmap editNicknameInput $ stWizard s}
+            KChar c ->
+                continue s{stWizard = fmap (`snocNickname` c) $ stWizard s}
             _ -> continue s
         WzDone -> case key of
             KEsc -> closeWizard s
@@ -314,14 +362,41 @@ handleKey key mods s
     wizardOf st = case stWizard st of
         Just w -> w
         Nothing -> Wizard WzSource [] Nothing "" ""
+    toEnableAsk = case wzNew $ wizardOf s of
+        Nothing -> closeWizard s
+        Just p -> continue s{stConfirm = Just p}
     submit =
         let Form{formSmdp, formCode} = stForm s
         in  case resolveDownloadInput formSmdp formCode of
                 Left err -> continue s{stStatus = Just $ Failure err}
-                Right target ->
-                    launch
-                        (Download target Nothing)
-                        s{stForm = emptyForm, stView = ProfilesView}
+                Right target
+                    | targetConfirmationRequired target
+                    , Just w <- stWizard s ->
+                        continue
+                            s
+                                { stWizard = Just w{wzPhase = WzConfirm}
+                                , stStatus =
+                                    Just $
+                                        Info $
+                                            "This code asks for a \
+                                            \confirmation code."
+                                }
+                    | targetConfirmationRequired target ->
+                        continue
+                            s
+                                { stStatus =
+                                    Just $
+                                        Failure $
+                                            "This code asks for a \
+                                            \confirmation code; use the \
+                                            \guided install (g)."
+                                }
+                    | Just _ <- stWizard s ->
+                        launch (Download target Nothing) s{stForm = emptyForm}
+                    | otherwise ->
+                        launch
+                            (Download target Nothing)
+                            s{stForm = emptyForm, stView = ProfilesView}
     onForm f = s{stForm = f $ stForm s}
     switchTo view = case snapshotOf s of
         Just _ -> continue s{stView = view}
@@ -380,13 +455,14 @@ profilesOf = maybe [] snapProfiles . snapshotOf
 notificationsOf :: State -> [Notification]
 notificationsOf = maybe [] snapNotifications . snapshotOf
 
--- | Record a finished job.
-finishJob :: JobResult -> State -> State
+-- | Record a finished job, starting the next job of a guided
+-- install when there is one.
+finishJob :: JobResult -> State -> (State, Maybe Job)
 finishJob JobResult{..} s =
     let filled = case resultQr of
             Just target -> fillFrom target s
             Nothing -> s
-        s' =
+        s1 =
             filled
                 { stBusy = Nothing
                 , stCard = maybe (stCard filled) Just resultSnapshot
@@ -395,13 +471,73 @@ finishJob JobResult{..} s =
                     (Left f, _) -> Just $ Failure $ describeFailure f
                     (Right msg, _) -> Just $ Info msg
                 }
-    in  s'
-            { stProfileCursor =
-                clamp (length $ profilesOf s') $ stProfileCursor s'
-            , stNotificationCursor =
-                clamp (length $ notificationsOf s') $
-                    stNotificationCursor s'
-            }
+        s2 =
+            s1
+                { stProfileCursor =
+                    clamp (length $ profilesOf s1) $ stProfileCursor s1
+                , stNotificationCursor =
+                    clamp (length $ notificationsOf s1) $
+                        stNotificationCursor s1
+                }
+    in  advanceWizard resultJob resultOutcome resultSnapshot s2
+
+-- | Move a guided install forward after one of its jobs finished.
+-- A failure closes it; success advances by the step that ran.
+advanceWizard
+    :: Job
+    -> Either LpacFailure Text
+    -> Maybe (Either LpacFailure Snapshot)
+    -> State
+    -> (State, Maybe Job)
+advanceWizard job outcome snapshot s = case stWizard s of
+    Nothing -> (s, Nothing)
+    Just w -> case job of
+        -- Reading the QR is part of the source step; its failure
+        -- leaves the wizard where it is.
+        DecodeQr _ -> (s, Nothing)
+        _ -> case outcome of
+            Left _ -> (s{stWizard = Nothing}, Nothing)
+            Right _ -> case job of
+                Download _ _ -> case newProfileOf w snapshot of
+                    [p] ->
+                        ( s
+                            { stWizard =
+                                Just
+                                    w
+                                        { wzPhase = WzNickname
+                                        , wzNew = Just p
+                                        , wzNicknameInput = ""
+                                        }
+                            }
+                        , Nothing
+                        )
+                    _ -> (s{stWizard = Nothing}, Nothing)
+                Nickname _ _ ->
+                    (s{stConfirm = wzNew w}, Nothing)
+                Enable _ ->
+                    let seqs = case snapshot of
+                            Just (Right snap) ->
+                                map notificationSeq $ snapNotifications snap
+                            _ -> []
+                    in  if null seqs
+                            then (s{stWizard = Just w{wzPhase = WzDone}}, Nothing)
+                            else
+                                ( s{stWizard = Just w}
+                                , Just $ SendNotifications seqs
+                                )
+                SendNotifications _ ->
+                    (s{stWizard = Just w{wzPhase = WzDone}}, Nothing)
+                _ -> (s, Nothing)
+
+-- | The profiles that appeared with the latest card read.
+newProfileOf
+    :: Wizard -> Maybe (Either LpacFailure Snapshot) -> [Profile]
+newProfileOf w = \case
+    Just (Right snap) ->
+        filter
+            (\p -> profileIccid p `notElem` wzKnownIccids w)
+            $ snapProfiles snap
+    _ -> []
 
 -- | Put a decoded activation code into the form, masked.
 fillFrom :: DownloadTarget -> State -> State
@@ -420,6 +556,19 @@ focus f form = form{formFocus = f}
 
 focusCode :: Form -> Form
 focusCode = focus CodeField
+
+editConfirm :: Wizard -> Wizard
+editConfirm w = w{wzConfirmInput = T.dropEnd 1 $ wzConfirmInput w}
+
+snocConfirm :: Wizard -> Char -> Wizard
+snocConfirm w c = w{wzConfirmInput = T.snoc (wzConfirmInput w) c}
+
+editNicknameInput :: Wizard -> Wizard
+editNicknameInput w =
+    w{wzNicknameInput = T.dropEnd 1 $ wzNicknameInput w}
+
+snocNickname :: Wizard -> Char -> Wizard
+snocNickname w c = w{wzNicknameInput = T.snoc (wzNicknameInput w) c}
 
 -- | The profile under the cursor.
 selectedProfile :: State -> Maybe Profile

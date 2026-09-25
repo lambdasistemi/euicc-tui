@@ -29,7 +29,7 @@ import Brick
     , hBox
     , hLimit
     , halt
-    , modify
+
     , neverShowCursor
     , on
     , padBottom
@@ -122,7 +122,11 @@ handleEvent launch = \case
             Continue s' job -> do
                 put s'
                 liftIO $ traverse_ launch job
-    AppEvent (JobDone r) -> modify $ finishJob r
+    AppEvent (JobDone r) -> do
+        s <- get
+        let (s', job) = finishJob r s
+        put s'
+        liftIO $ traverse_ launch job
     _ -> pure ()
 
 -- Attributes -------------------------------------------------------
