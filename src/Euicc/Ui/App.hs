@@ -22,7 +22,6 @@ import Brick
     , Widget
     , attrMap
     , attrName
-    , bg
     , customMain
     , emptyWidget
     , fg
@@ -183,7 +182,15 @@ busyAttr = attrName "busy"
 
 -- | The background of every other table row.
 stripe :: V.Color
-stripe = V.rgbColor (0x26 :: Int) 0x2a 0x33
+stripe = V.rgbColor (0xff :: Int) 0xff 0xd7
+
+-- | The background of the other table rows.
+paper :: V.Color
+paper = V.rgbColor (0xff :: Int) 0xff 0xff
+
+-- | Readable green on the pale stripe.
+darkGreen :: V.Color
+darkGreen = V.rgbColor (0x00 :: Int) 0x64 0x00
 
 attributes :: AttrMap
 attributes =
@@ -193,11 +200,11 @@ attributes =
         , (tabAttr, fg V.brightBlack)
         , (tabActiveAttr, V.black `on` V.cyan `V.withStyle` V.bold)
         , (columnAttr, V.defAttr `V.withStyle` V.bold)
-        , (plainAttr, V.defAttr)
-        , (stripeAttr, bg stripe)
+        , (plainAttr, V.black `on` paper)
+        , (stripeAttr, V.black `on` stripe)
         , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
-        , (enabledAttr, fg V.green `V.withStyle` V.bold)
-        , (enabledStripeAttr, V.green `on` stripe `V.withStyle` V.bold)
+        , (enabledAttr, darkGreen `on` paper `V.withStyle` V.bold)
+        , (enabledStripeAttr, darkGreen `on` stripe `V.withStyle` V.bold)
         , (dimAttr, fg V.brightBlack)
         , (keyAttr, fg V.cyan `V.withStyle` V.bold)
         , (titleAttr, V.defAttr `V.withStyle` V.bold)
