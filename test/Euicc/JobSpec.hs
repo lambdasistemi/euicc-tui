@@ -135,6 +135,7 @@ spec = do
                 DownloadTarget
                     { targetSmdp = "smdp.example.com"
                     , targetMatchingId = mkSecret "SECRET-MATCHING-ID"
+                    , targetConfirmationRequired = False
                     }
         it "downloads from the given target" $ do
             (r, cmds) <-

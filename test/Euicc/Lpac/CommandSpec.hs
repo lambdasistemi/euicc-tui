@@ -1,6 +1,7 @@
 module Euicc.Lpac.CommandSpec (spec) where
 
 import Data.List (isInfixOf)
+import Data.Text qualified as T
 import Euicc.ActivationCode (DownloadTarget (..), mkSecret)
 import Euicc.Lpac.Command
     ( Command (..)
@@ -10,14 +11,19 @@ import Euicc.Lpac.Command
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 import Test.QuickCheck
     ( Gen
+    , arbitrary
     , choose
     , elements
     , forAll
     , listOf
+    , listOf1
     , oneof
     , property
     , (===)
     )
+
+genNickname :: Gen T.Text
+genNickname = T.pack <$> listOf1 (elements $ ['a' .. 'z'] <> ['0' .. '9'])
 
 genCommand :: Gen Command
 genCommand =
@@ -25,13 +31,16 @@ genCommand =
         [ pure ReadChipInfo
         , pure ListProfiles
         , pure $ EnableProfile "8944476500001234567"
+        , NicknameProfile "8944476500001234567" <$> genNickname
         , pure ListNotifications
         , ProcessNotifications <$> listOf (choose (0, 1000))
-        , pure $ DownloadProfile $ DownloadTarget "a.com" $ mkSecret "X"
+        , DownloadProfile
+            <$> (DownloadTarget "a.com" <$> (mkSecret <$> genNickname) <*> arbitrary)
+            <*> arbitrary
         ]
 
 download :: Command
-download = DownloadProfile $ DownloadTarget "a.com" $ mkSecret "X-1"
+download = DownloadProfile $ DownloadTarget "a.com" (mkSecret "X-1") False
 
 spec :: Spec
 spec = do
@@ -58,6 +67,24 @@ spec = do
                            , "-m"
                            , "X-1"
                            ]
+        it "downloads with a confirmation code when one is given" $
+            commandArgs
+                ( DownloadProfile
+                    (DownloadTarget "a.com" (mkSecret "X-1") True)
+                    (Just $ mkSecret "C-9")
+                )
+                `shouldBe` [ "profile"
+                           , "download"
+                           , "-s"
+                           , "a.com"
+                           , "-m"
+                           , "X-1"
+                           , "-c"
+                           , "C-9"
+                           ]
+        it "nicknames a profile by ICCID" $
+            commandArgs (NicknameProfile "894" "holiday")
+                `shouldBe` ["profile", "nickname", "894", "holiday"]
         it "never deletes, disables or removes without sending" $
             property $
                 forAll genCommand $ \c ->

@@ -136,9 +136,11 @@ runJob runner job = do
                 $ profileIccid p
         SendNotifications seqs ->
             done "Notifications sent." $ ProcessNotifications seqs
-        Download target@DownloadTarget{targetMatchingId} ->
+        Download target@DownloadTarget{targetMatchingId} confirmation ->
             first (redactFailure targetMatchingId)
-                <$> done "Profile downloaded." (DownloadProfile target)
+                <$> done
+                    "Profile downloaded."
+                    (DownloadProfile target confirmation)
 
 -- | Remove a secret from every text a failure carries.
 redactFailure :: Secret -> LpacFailure -> LpacFailure

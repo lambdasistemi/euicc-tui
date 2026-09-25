@@ -46,6 +46,9 @@ data DownloadTarget = DownloadTarget
     -- ^ SM-DP+ address
     , targetMatchingId :: Secret
     -- ^ matching ID (the activation code proper)
+    , targetConfirmationRequired :: Bool
+    -- ^ the activation code asks for a confirmation code
+    -- (SGP.22 flag @1@), which the operator must type in
     }
     deriving stock (Eq, Show)
 
@@ -71,18 +74,22 @@ parseActivationCode input = do
                 Left "unsupported activation code format"
             when (T.null smdp) $ Left "the SM-DP+ address is empty"
             when (T.null matchingId) $ Left "the matching ID is empty"
-            when (confirmationRequired rest) $
-                Left "codes that need a confirmation code are not supported"
+            confirmationRequired <- flagOf rest
             pure
                 DownloadTarget
                     { targetSmdp = smdp
                     , targetMatchingId = Secret matchingId
+                    , targetConfirmationRequired = confirmationRequired
                     }
         _ -> Left "an activation code has the form LPA:1$<address>$<code>"
   where
-    confirmationRequired = \case
-        [_oid, "1"] -> True
-        _ -> False
+    -- The fields after the matching ID are the optional OID of the
+    -- operator asking for a confirmation, then the flag itself.
+    flagOf = \case
+        [] -> Right False
+        [_oid] -> Right False
+        [_oid, flag] -> Right (flag == "1")
+        _ -> Left "unsupported activation code format"
 
 {- | Build a target from the two form fields. Either field may hold a
 pasted @LPA:1$...@ string, which then supplies both parts.
@@ -103,6 +110,7 @@ resolveDownloadInput smdpField codeField
             DownloadTarget
                 { targetSmdp = smdp
                 , targetMatchingId = Secret code
+                , targetConfirmationRequired = False
                 }
   where
     smdp = T.strip smdpField

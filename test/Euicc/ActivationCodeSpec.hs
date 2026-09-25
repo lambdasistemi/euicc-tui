@@ -37,6 +37,9 @@ genSmdp = do
 target :: DownloadTarget -> (Text, Text)
 target DownloadTarget{..} = (targetSmdp, revealSecret targetMatchingId)
 
+requiresConfirmation :: DownloadTarget -> Bool
+requiresConfirmation = targetConfirmationRequired
+
 spec :: Spec
 spec = do
     describe "parseActivationCode" $ do
@@ -51,8 +54,19 @@ spec = do
         it "ignores a trailing OID" $
             fmap target (parseActivationCode "LPA:1$a.com$X-1$1.2.3")
                 `shouldBe` Right ("a.com", "X-1")
-        it "rejects a code that requires a confirmation code" $
-            parseActivationCode "LPA:1$a.com$X-1$$1"
+        it "parses a code that requires a confirmation code" $
+            fmap requiresConfirmation
+                (parseActivationCode "LPA:1$a.com$X-1$1.2.3$1")
+                `shouldBe` Right True
+        it "treats flag 0 as no confirmation needed" $
+            fmap requiresConfirmation
+                (parseActivationCode "LPA:1$a.com$X-1$1.2.3$0")
+                `shouldBe` Right False
+        it "needs no confirmation when no flag is given" $
+            fmap requiresConfirmation (parseActivationCode "LPA:1$a.com$X-1")
+                `shouldBe` Right False
+        it "rejects a code with too many fields" $
+            parseActivationCode "LPA:1$a.com$X-1$1.2.3$1$extra"
                 `shouldSatisfy` isLeft
         it "rejects an unknown format version" $
             parseActivationCode "LPA:2$a.com$X-1" `shouldSatisfy` isLeft
@@ -75,6 +89,10 @@ spec = do
         it "accepts an LPA string pasted in the address field" $
             fmap target (resolveDownloadInput "LPA:1$a.com$X-1" "")
                 `shouldBe` Right ("a.com", "X-1")
+        it "carries the confirmation requirement through the fields" $
+            fmap requiresConfirmation
+                (resolveDownloadInput "" "LPA:1$a.com$X-1$1.2.3$1")
+                `shouldBe` Right True
         it "rejects empty fields" $ do
             resolveDownloadInput "" "X-1" `shouldSatisfy` isLeft
             resolveDownloadInput "a.com" "" `shouldSatisfy` isLeft
