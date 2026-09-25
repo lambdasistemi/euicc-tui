@@ -13,18 +13,20 @@ module Euicc.Dir
 -- One small read-only step of the guided install: what files live in
 -- a directory, so the operator can pick the purchase QR with the
 -- cursor instead of typing a path. Only directories and images are
--- listed, directories first; dotfiles are hidden, and nothing here
--- touches the card.
+-- listed, the most recently modified first, so a QR just saved is
+-- under the cursor; dotfiles are hidden, and nothing here touches the
+-- card.
 
 import Control.Exception (IOException, try)
-import Data.Bifunctor (first)
 import Data.Char (toLower)
 import Data.List (sortOn)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Euicc.Lpac.Output (LpacFailure (..))
 import System.Directory
     ( doesDirectoryExist
+    , getModificationTime
     , listDirectory
     , makeAbsolute
     )
@@ -33,8 +35,8 @@ import System.FilePath (takeExtension, (</>))
 -- | One entry of a listing: is it a directory, and its name.
 type DirEntry = (Bool, Text)
 
-{- | The directories and images in a directory, directories first,
-each group sorted by name, without dotfiles, with the directory's
+{- | The directories and images in a directory, the most recently
+modified first (by name among equals), without dotfiles, with the directory's
 absolute path, so that its parent is always reachable. A missing or
 unreadable directory is a failure with the reason.
 -}
@@ -50,13 +52,20 @@ listDir relative = do
                 $ T.pack
                 $ "cannot list " <> path <> ": " <> show e
         Right names -> do
-            let classify name =
-                    (,T.pack name) <$> doesDirectoryExist (path </> name)
+            let classify name = do
+                    isDir <- doesDirectoryExist (path </> name)
+                    modified <- try $ getModificationTime (path </> name)
+                    pure
+                        ( either (\(_ :: IOException) -> Nothing) Just modified
+                        , (isDir, T.pack name)
+                        )
             entries <- mapM classify names
             pure $
                 Right
                     ( path
-                    , sortOn (first not) $ filter shown entries
+                    , map snd
+                        $ sortOn (\(t, (_, n)) -> (Down t, n))
+                        $ filter (shown . snd) entries
                     )
   where
     shown (isDir, name) =

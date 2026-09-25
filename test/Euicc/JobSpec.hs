@@ -1,9 +1,10 @@
 module Euicc.JobSpec (spec) where
 
 import Data.IORef (modifyIORef, newIORef, readIORef)
-import Data.List (isSuffixOf, sort)
+import Data.List (isSuffixOf)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Euicc.ActivationCode (DownloadTarget (..), mkSecret)
 import Euicc.Job
     ( Job (..)
@@ -23,8 +24,14 @@ import Euicc.Lpac.Output
     , profileLabel
     )
 import Fixtures (fixture, fixtureOk)
+import System.Directory
+    ( createDirectory
+    , getTemporaryDirectory
+    , removePathForcibly
+    , setModificationTime
+    )
 import System.Exit (ExitCode (..))
-import System.FilePath (isAbsolute, takeDirectory)
+import System.FilePath (isAbsolute, takeDirectory, (</>))
 import Test.Hspec
     ( Spec
     , describe
@@ -235,15 +242,26 @@ spec = do
                     takeDirectory cwd `shouldSatisfy` (/= cwd)
                     entryNames entries
                         `shouldContain` ["qr-lpa-ok.png", "qr-none.png"]
-                    entryNames entries `shouldSatisfy` (\names -> names == sort names)
                     entries `shouldSatisfy` noDotEntries
                     entryNames entries `shouldSatisfy` notElem "profile-list.stdout"
-        it "lists directories first, then images only" $ do
-            (r, _) <- runRecorded (const Nothing) (ReadDir "test")
-            case resultDir r of
-                Nothing -> error "no directory listing in the result"
-                Just (_, entries) ->
-                    entries `shouldBe` [(True, "Euicc"), (True, "fixtures")]
+        it "lists folders and images only, the newest first" $ do
+            tmp <- getTemporaryDirectory
+            let dir = tmp </> "euicc-tui-dir-spec"
+                at name secs = do
+                    writeFile (dir </> name) ""
+                    setModificationTime (dir </> name) $
+                        posixSecondsToUTCTime secs
+            removePathForcibly dir
+            createDirectory dir
+            at "old.png" 1000
+            at "notes.txt" 3000
+            at "new.jpg" 2000
+            createDirectory (dir </> "sub")
+            setModificationTime (dir </> "sub") $ posixSecondsToUTCTime 1500
+            (r, _) <- runRecorded (const Nothing) (ReadDir dir)
+            removePathForcibly dir
+            fmap snd (resultDir r)
+                `shouldBe` Just [(False, "new.jpg"), (True, "sub"), (False, "old.png")]
         it "reports a missing directory" $ do
             (r, cmds) <-
                 runRecorded (const Nothing) (ReadDir "no-such-dir")
