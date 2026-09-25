@@ -12,6 +12,7 @@ pkgs.writeShellApplication {
     pkgs.dpkg
     pkgs.findutils
     pkgs.gnugrep
+    pkgs.gnutar
     pkgs.rpm
   ];
   text = ''
@@ -73,6 +74,10 @@ pkgs.writeShellApplication {
     [ "$depends" = "pcscd, libccid, libpcsclite1" ] \
       || fail "deb: Depends is '$depends', not 'pcscd, libccid, libpcsclite1'"
     echo "deb: Depends: $depends"
+    # dpkg cannot unpack a hard link to a file it has not unpacked yet
+    if dpkg-deb --fsys-tarfile "$deb" | tar -tv | grep -q ' link to '; then
+      fail "deb: contains hard links"
+    fi
     dpkg-deb -x "$deb" "$workdir/deb"
     smoke_root deb "$workdir/deb" "$(usr_bin_target "$workdir/deb" deb)"
 
@@ -87,6 +92,8 @@ pkgs.writeShellApplication {
     # no inherited setgid bit on the directories cpio creates
     chmod g-s "$workdir/rpm"
     (cd "$workdir/rpm" && rpm2cpio "$rpm" | cpio -idm --quiet)
+    links="$(find "$workdir/rpm" -type f -links +1 | head -3)"
+    [ -z "$links" ] || fail "rpm: contains hard links: $links"
     smoke_root rpm "$workdir/rpm" "$(usr_bin_target "$workdir/rpm" rpm)"
 
     appimage="$prefix.AppImage"

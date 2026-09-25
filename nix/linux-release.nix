@@ -30,11 +30,13 @@ let
   # revision or release
   pkgVersion = builtins.replaceStrings [ "-" ] [ "+" ] artifactVersion;
 
-  # the installed tree shared by both packages
+  # The installed tree shared by both packages. Hard links are not
+  # kept: an optimised store links identical files across store paths,
+  # and dpkg fails on a link to a file it has not unpacked yet.
   root = pkgs.runCommand "${name}-${artifactVersion}-root" { } ''
     mkdir -p $out/nix/store $out/usr/bin
     while read -r path; do
-      cp -a "$path" $out/nix/store/
+      cp -a --no-preserve=links "$path" $out/nix/store/
     done < ${closure}/store-paths
     ln -s ${pkgs.lib.getExe package} $out/usr/bin/${name}
   '';
