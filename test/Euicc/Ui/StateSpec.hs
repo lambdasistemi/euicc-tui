@@ -267,11 +267,11 @@ spec = do
                     j `shouldBe` Nothing
                     stHelp s2 `shouldBe` False
                 Halt -> error "q closed the program under the help"
-        it "types ? into a text field instead" $ do
+        it "opens on ? even in a text field, leaving it untouched" $ do
             s0 <- loaded
             let (s1, _) = pressAll [KChar 'd', KChar '?'] s0
-            stHelp s1 `shouldBe` False
-            formSmdp (stForm s1) `shouldBe` "?"
+            stHelp s1 `shouldBe` True
+            formSmdp (stForm s1) `shouldBe` ""
     describe "busy" $ do
         it "starts no job while one is running" $ do
             s0 <- loaded

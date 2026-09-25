@@ -47,7 +47,7 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
 ## Keys
 
-Press `?` for the keys of the current screen (outside text fields).
+Press `?` for the keys of the current screen.
 
 | View | Keys |
 |---|---|

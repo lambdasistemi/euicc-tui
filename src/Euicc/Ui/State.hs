@@ -219,7 +219,7 @@ handleKey :: Key -> [Modifier] -> State -> Step
 handleKey key mods s
     | key == KChar 'c' && MCtrl `elem` mods = Halt
     | stHelp s = continue s{stHelp = False}
-    | key == KChar '?' && not (typing s) = continue s{stHelp = True}
+    | key == KChar '?' = continue s{stHelp = True}
     | Just b <- stBrowser s = browsing b
     | Just (p, t) <- stDelete s = deleting p t
     | Just (p, t) <- stNicknameEdit s = nicknaming p t
@@ -695,8 +695,8 @@ its ICCID.
 deleteCheck :: Profile -> Text
 deleteCheck = T.takeEnd 4 . profileIccid
 
-{- | Whether keys go into a text field, where @?@ is a character and
-not the help key.
+{- | Whether keys go into a text field, so the bottom line shows
+the field keys.
 -}
 typing :: State -> Bool
 typing s = case (stNicknameEdit s, stDelete s) of

@@ -31,6 +31,7 @@ import Brick
     , halt
     , neverShowCursor
     , on
+    , overrideAttr
     , padBottom
     , padLeft
     , padLeftRight
@@ -45,9 +46,10 @@ import Brick
     , withBorderStyle
     )
 import Brick.BChan (newBChan, writeBChan)
-import Brick.Widgets.Border (borderWithLabel, hBorder)
+import Brick.Widgets.Border (borderAttr, hBorder)
 import Brick.Widgets.Border.Style (unicodeRounded)
-import Brick.Widgets.Center (center, centerLayer, hCenter)
+import Brick.Widgets.Center (center, hCenter)
+import Brick.Widgets.Dialog (dialog, dialogAttr, renderDialog)
 import Control.Concurrent (forkIO)
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
@@ -151,6 +153,8 @@ barAttr
     , keyAttr
     , titleAttr
     , dangerAttr
+    , dangerBorderAttr
+    , focusLabelAttr
     , inputAttr
     , inputFocusAttr
     , dirAttr
@@ -169,6 +173,8 @@ dimAttr = attrName "dim"
 keyAttr = attrName "key"
 titleAttr = attrName "title"
 dangerAttr = attrName "danger"
+dangerBorderAttr = attrName "dangerBorder"
+focusLabelAttr = attrName "focusLabel"
 inputAttr = attrName "input"
 inputFocusAttr = attrName "inputFocus"
 dirAttr = attrName "dir"
@@ -184,7 +190,6 @@ stripe = V.rgbColor (0xff :: Int) 0xff 0xd7
 paper :: V.Color
 paper = V.rgbColor (0xff :: Int) 0xff 0xff
 
-
 attributes :: AttrMap
 attributes =
     attrMap
@@ -196,11 +201,15 @@ attributes =
         , (plainAttr, V.black `on` paper)
         , (stripeAttr, V.black `on` stripe)
         , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
-        , (dimAttr, fg V.brightBlack)
-        , (keyAttr, fg V.cyan `V.withStyle` V.bold)
+        , (dimAttr, fg $ V.rgbColor (0x5f :: Int) 0x5f 0x5f)
+        , (keyAttr, fg V.blue `V.withStyle` V.bold)
+        , (dialogAttr, V.black `on` V.rgbColor (0xee :: Int) 0xee 0xee)
+        , (borderAttr, fg V.brightBlack)
+        , (dangerBorderAttr, fg V.red)
+        , (focusLabelAttr, fg V.blue `V.withStyle` V.bold)
         , (titleAttr, V.defAttr `V.withStyle` V.bold)
         , (dangerAttr, fg V.red `V.withStyle` V.bold)
-        , (inputAttr, V.white `on` V.brightBlack)
+        , (inputAttr, V.black `on` V.rgbColor (0xd0 :: Int) 0xd0 0xd0)
         , (inputFocusAttr, V.black `on` V.white)
         , (dirAttr, fg V.blue `V.withStyle` V.bold)
         , (failureAttr, fg V.red `V.withStyle` V.bold)
@@ -224,6 +233,7 @@ mainLayer :: State -> Widget ()
 mainLayer s =
     vBox
         [ topBar s
+        , txt " "
         , tabs s
         , hBorder
         , padBottom Max $ padTop (Pad 1) $ body s
@@ -276,13 +286,12 @@ body :: State -> Widget ()
 body s = case stCard s of
     Nothing -> center $ withAttr dimAttr $ txt "Reading the card..."
     Just (Left f) ->
-        center $
-            panel
-                "The card could not be read"
-                [ withAttr failureAttr $ txtWrap $ describeFailure f
-                , txt " "
-                , hints [("r", "try again"), ("q", "quit")]
-                ]
+        panel
+            "The card could not be read"
+            [ withAttr failureAttr $ txtWrap $ describeFailure f
+            , txt " "
+            , hints [("r", "try again"), ("q", "quit")]
+            ]
     Just (Right snap) -> case stView s of
         ProfilesView -> profilesTable s snap
         NotificationsView -> notificationsTable s snap
@@ -389,13 +398,22 @@ notificationsTable s snap = case snapNotifications snap of
 
 -- | A titled, rounded box of bounded width.
 panel :: Text -> [Widget ()] -> Widget ()
-panel = panelWith titleAttr
+panel = panelWith False
 
-panelWith :: AttrName -> Text -> [Widget ()] -> Widget ()
-panelWith attr title contents =
-    hLimit 66
+panelWith :: Bool -> Text -> [Widget ()] -> Widget ()
+panelWith danger title contents =
+    (if danger then overrideAttr borderAttr dangerBorderAttr else id)
         $ withBorderStyle unicodeRounded
-        $ borderWithLabel (withAttr attr $ txt $ " " <> title <> " ")
+        $ renderDialog
+            ( dialog
+                ( Just
+                    $ withAttr (if danger then dangerAttr else titleAttr)
+                    $ txt
+                    $ " " <> title <> " "
+                )
+                Nothing
+                66
+            )
         $ padLeftRight 2
         $ padTopBottom 1
         $ vBox contents
@@ -424,7 +442,7 @@ inputOr placeholder focused w value
 field :: Bool -> Text -> Widget () -> Widget ()
 field focused label widget =
     hBox
-        [ withAttr (if focused then keyAttr else dimAttr)
+        [ withAttr (if focused then focusLabelAttr else dimAttr)
             $ txt
             $ (if focused then "› " else "  ") <> label
         , widget
@@ -433,22 +451,21 @@ field focused label widget =
 -- | The source form shared by the download view and the guided install.
 formPanel :: Form -> [Text] -> Widget ()
 formPanel form notes =
-    center
-        $ panel "Where does the plan come from?"
-        $ [ field (focused QrField) "QR image         " $
-                inputOr
-                    "enter to browse, or type a path"
-                    (focused QrField)
-                    40
-                    (formQr form)
-          , txt " "
-          , field (focused SmdpField) "SM-DP+ address   " $
-                input (focused SmdpField) 40 (smdpDisplay form)
-          , txt " "
-          , field (focused CodeField) "Activation code  " $
-                input (focused CodeField) 40 (codeDisplay form)
-          , txt " "
-          ]
+    panel "Where does the plan come from?" $
+        [ field (focused QrField) "QR image         " $
+            inputOr
+                "enter to browse, or type a path"
+                (focused QrField)
+                40
+                (formQr form)
+        , txt " "
+        , field (focused SmdpField) "SM-DP+ address   " $
+            input (focused SmdpField) 40 (smdpDisplay form)
+        , txt " "
+        , field (focused CodeField) "Activation code  " $
+            input (focused CodeField) 40 (codeDisplay form)
+        , txt " "
+        ]
             <> map (withAttr dimAttr . txt) notes
   where
     focused f = formFocus form == f
@@ -463,37 +480,34 @@ wizardBody s = case wzPhase w of
             ]
     WzReady
         | Just (Download _ _) <- stBusy s ->
-            center $
-                panel
-                    "Installing"
-                    [ withAttr busyAttr $ txt "Downloading the plan onto the card..."
-                    , txt " "
-                    , withAttr dimAttr $
-                        txt "This takes a few seconds; the list follows."
-                    ]
-        | otherwise ->
-            center $
-                panel
-                    "QR code read"
-                    [ summary "SM-DP+ address" $ smdpDisplay form
-                    , summary "Activation code" $ codeDisplay form
-                    , txt " "
-                    , txt "Install this plan on the card?"
-                    , txt " "
-                    , hints [("enter", "install"), ("esc", "cancel")]
-                    ]
-    WzConfirm ->
-        center $
             panel
-                "Confirmation code"
-                [ txtWrap
-                    "This activation code asks for a confirmation code. \
-                    \The provider sent it separately; it is never shown."
+                "Installing"
+                [ withAttr busyAttr $ txt "Downloading the plan onto the card..."
                 , txt " "
-                , field True "Confirmation code  " $ input True 30 $ confirmDisplay w
+                , withAttr dimAttr $
+                    txt "This takes a few seconds; the list follows."
+                ]
+        | otherwise ->
+            panel
+                "QR code read"
+                [ summary "SM-DP+ address" $ smdpDisplay form
+                , summary "Activation code" $ codeDisplay form
+                , txt " "
+                , txt "Install this plan on the card?"
                 , txt " "
                 , hints [("enter", "install"), ("esc", "cancel")]
                 ]
+    WzConfirm ->
+        panel
+            "Confirmation code"
+            [ txtWrap
+                "This activation code asks for a confirmation code. \
+                \The provider sent it separately; it is never shown."
+            , txt " "
+            , field True "Confirmation code  " $ input True 30 $ confirmDisplay w
+            , txt " "
+            , hints [("enter", "install"), ("esc", "cancel")]
+            ]
   where
     w = fromMaybe (Wizard WzSource [] "") $ stWizard s
     form = stForm s
@@ -512,10 +526,17 @@ bottomLine s =
         hBox
             [ padRight Max status
             , if typing s
-                then hints [("tab", "field"), ("enter", "ok"), ("esc", "cancel")]
+                then
+                    hints
+                        ( [("tab", "field") | inForm]
+                            <> [("enter", "ok"), ("esc", "cancel"), ("?", "help")]
+                        )
                 else hints [("?", "help")]
             ]
   where
+    inForm = case (stNicknameEdit s, stDelete s) of
+        (Nothing, Nothing) -> True
+        _ -> False
     status = case (stBusy s, stStatus s) of
         (Just job, _) ->
             withAttr busyAttr $ txt $ "⟳ " <> capital (jobLabel job) <> "..."
@@ -546,6 +567,18 @@ keysFor s
         , ("backspace", "parent directory")
         , ("esc", "cancel")
         ]
+    | Just _ <- stDelete s =
+        [ ("digits", "the last four digits of the ICCID")
+        , ("enter", "delete if they match, else cancel")
+        , ("esc", "cancel")
+        ]
+    | Just _ <- stNicknameEdit s =
+        [ ("enter", "set the nickname; empty clears it")
+        , ("backspace", "erase")
+        , ("esc", "cancel")
+        ]
+    | Just _ <- stConfirm s =
+        [("y", "enable the profile"), ("any key", "cancel")]
     | otherwise = case stView s of
         ProfilesView ->
             [ ("↑ ↓  j k", "move")
@@ -576,14 +609,13 @@ helpLayer :: State -> Widget ()
 helpLayer s
     | not (stHelp s) = emptyWidget
     | otherwise =
-        centerLayer
-            $ panel "Keys"
-            $ [ hBox
-                    [ withAttr keyAttr $ hLimit 14 $ padRight Max $ txt k
-                    , txt d
-                    ]
-              | (k, d) <- keysFor s
-              ]
+        panel "Keys" $
+            [ hBox
+                [ hLimit 16 $ padRight Max $ withAttr keyAttr $ txt k
+                , txt d
+                ]
+            | (k, d) <- keysFor s
+            ]
                 <> [ txt " "
                    , withAttr dimAttr $ txt "ctrl-c quits from anywhere."
                    , txt " "
@@ -599,11 +631,10 @@ browserLayer s = case stBrowser s of
         let window = 14
             top = max 0 $ min (length brItems - window) (brCursor - window `div` 2)
             shown = take window $ drop top $ zip [0 :: Int ..] brItems
-        in  centerLayer
-                $ panel "Pick the QR image"
-                $ [ withAttr dimAttr $ txt $ T.pack $ ellipsisLeft 58 brCwd
-                  , txt " "
-                  ]
+        in  panel "Pick the QR image" $
+                [ withAttr dimAttr $ txt $ T.pack $ ellipsisLeft 58 brCwd
+                , txt " "
+                ]
                     <> ( if null brItems
                             then [withAttr dimAttr $ txt "(empty)"]
                             else
@@ -639,20 +670,19 @@ confirmLayer :: State -> Widget ()
 confirmLayer s = case stConfirm s of
     Nothing -> emptyWidget
     Just p ->
-        centerLayer $
-            panel
-                "Enable profile"
-                [ hCenter $ withAttr titleAttr $ txt $ profileLabel p
-                , hCenter $ withAttr dimAttr $ txt $ profileIccid p
-                , txt " "
-                , txtWrap $ case enabledProfile of
-                    Just e ->
-                        profileLabel e
-                            <> " will be disabled. Switching works offline."
-                    Nothing -> "Switching works offline."
-                , txt " "
-                , hCenter $ hints [("y", "enable"), ("any key", "cancel")]
-                ]
+        panel
+            "Enable profile"
+            [ hCenter $ withAttr titleAttr $ txt $ profileLabel p
+            , hCenter $ withAttr dimAttr $ txt $ profileIccid p
+            , txt " "
+            , txtWrap $ case enabledProfile of
+                Just e ->
+                    profileLabel e
+                        <> " will be disabled. Switching works offline."
+                Nothing -> "Switching works offline."
+            , txt " "
+            , hCenter $ hints [("y", "enable"), ("any key", "cancel")]
+            ]
   where
     enabledProfile =
         find ((== Enabled) . profileState) . snapProfiles =<< snapshotOf s
@@ -661,43 +691,41 @@ nicknameLayer :: State -> Widget ()
 nicknameLayer s = case stNicknameEdit s of
     Nothing -> emptyWidget
     Just (p, t) ->
-        centerLayer $
-            panel
-                "Nickname"
-                [ hCenter $ withAttr titleAttr $ txt $ profileLabel p
-                , hCenter $ withAttr dimAttr $ txt $ profileIccid p
-                , txt " "
-                , hCenter $ input True 40 t
-                , txt " "
-                , hCenter $
-                    hints [("enter", "set"), ("empty", "clears"), ("esc", "cancel")]
-                ]
+        panel
+            "Nickname"
+            [ hCenter $ withAttr titleAttr $ txt $ profileLabel p
+            , hCenter $ withAttr dimAttr $ txt $ profileIccid p
+            , txt " "
+            , hCenter $ input True 40 t
+            , txt " "
+            , hCenter $
+                hints [("enter", "set"), ("empty", "clears"), ("esc", "cancel")]
+            ]
 
 deleteLayer :: State -> Widget ()
 deleteLayer s = case stDelete s of
     Nothing -> emptyWidget
     Just (p, t) ->
-        centerLayer $
-            panelWith
-                dangerAttr
-                "Delete profile"
-                [ hCenter $ withAttr titleAttr $ txt $ profileLabel p
-                , hCenter $ withAttr dimAttr $ txt $ profileIccid p
-                , txt " "
-                , withAttr dangerAttr $
-                    txtWrap
-                        "Deleting is permanent. Some providers' QR codes \
-                        \install only once; check before deleting."
-                , txt " "
-                , txtWrap $
-                    "Type the last "
-                        <> T.pack (show $ T.length $ deleteCheck p)
-                        <> " digits of the ICCID to confirm."
-                , txt " "
-                , hCenter $ input True 10 t
-                , txt " "
-                , hCenter $ hints [("enter", "delete if they match"), ("esc", "cancel")]
-                ]
+        panelWith
+            True
+            "Delete profile"
+            [ hCenter $ withAttr titleAttr $ txt $ profileLabel p
+            , hCenter $ withAttr dimAttr $ txt $ profileIccid p
+            , txt " "
+            , withAttr dangerAttr $
+                txtWrap
+                    "Deleting is permanent. Some providers' QR codes \
+                    \install only once; check before deleting."
+            , txt " "
+            , txtWrap $
+                "Type the last "
+                    <> T.pack (show $ T.length $ deleteCheck p)
+                    <> " digits of the ICCID to confirm."
+            , txt " "
+            , hCenter $ input True 10 t
+            , txt " "
+            , hCenter $ hints [("enter", "delete if they match"), ("esc", "cancel")]
+            ]
 
 snapshotOf :: State -> Maybe Snapshot
 snapshotOf s = case stCard s of
