@@ -111,6 +111,8 @@ data Name
     | NotificationRow Int
     | TabOf View
     | PickerEntry Int
+    | FieldOf Field
+    | KeyButton V.Key
     deriving stock (Eq, Ord, Show)
 
 -- | Run the UI until the user quits.
@@ -175,6 +177,8 @@ clickOf name = \case
         NotificationRow i -> ClickNotification i
         TabOf v -> ClickTab v
         PickerEntry i -> ClickPicker i
+        FieldOf f -> ClickField f
+        KeyButton k -> ClickKey k
     _ -> Nothing
 
 -- Attributes -------------------------------------------------------
@@ -188,6 +192,8 @@ barAttr
     , selectedAttr
     , dimAttr
     , keyAttr
+    , buttonAttr
+    , buttonKeyAttr
     , titleAttr
     , dangerAttr
     , dangerBorderAttr
@@ -208,6 +214,8 @@ stripeAttr = attrName "stripe"
 selectedAttr = attrName "selected"
 dimAttr = attrName "dim"
 keyAttr = attrName "key"
+buttonAttr = attrName "button"
+buttonKeyAttr = buttonAttr <> attrName "key"
 titleAttr = attrName "title"
 dangerAttr = attrName "danger"
 dangerBorderAttr = attrName "dangerBorder"
@@ -240,6 +248,8 @@ attributes =
         , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
         , (dimAttr, fg $ V.rgbColor (0x5f :: Int) 0x5f 0x5f)
         , (keyAttr, fg V.blue `V.withStyle` V.bold)
+        , (buttonAttr, V.black `on` V.rgbColor (0xc6 :: Int) 0xdb 0xf0)
+        , (buttonKeyAttr, fg V.blue `V.withStyle` V.bold)
         , (dialogAttr, V.black `on` V.rgbColor (0xee :: Int) 0xee 0xee)
         , (borderAttr, fg V.brightBlack)
         , (dangerBorderAttr, fg V.red)
@@ -492,18 +502,21 @@ field focused label widget =
 formPanel :: Form -> [Text] -> Widget Name
 formPanel form notes =
     panel "Where does the plan come from?" $
-        [ field (focused QrField) "QR image         " $
-            inputOr
+        [ clickable (FieldOf QrField)
+            $ field (focused QrField) "QR image         "
+            $ inputOr
                 "enter to browse, or type a path"
                 (focused QrField)
                 40
                 (formQr form)
         , txt " "
-        , field (focused SmdpField) "SM-DP+ address   " $
-            input (focused SmdpField) 40 (smdpDisplay form)
+        , clickable (FieldOf SmdpField)
+            $ field (focused SmdpField) "SM-DP+ address   "
+            $ input (focused SmdpField) 40 (smdpDisplay form)
         , txt " "
-        , field (focused CodeField) "Activation code  " $
-            input (focused CodeField) 40 (codeDisplay form)
+        , clickable (FieldOf CodeField)
+            $ field (focused CodeField) "Activation code  "
+            $ input (focused CodeField) 40 (codeDisplay form)
         , txt " "
         ]
             <> map (withAttr dimAttr . txt) notes
@@ -587,16 +600,29 @@ bottomLine s =
         Just (c, rest) -> T.cons (toUpper c) rest
         Nothing -> t
 
--- | Key hints on one line.
+{- | Key hints on one line. A hint naming a key is a button: a
+click on it presses the key.
+-}
 hints :: [(Text, Text)] -> Widget Name
 hints = hBox . zipWith hint [0 :: Int ..]
   where
     hint i (k, d) =
         hBox
             [ txt $ if i == 0 then "" else "   "
-            , withAttr keyAttr $ txt k
-            , txt $ " " <> d
+            , maybe id (clickable . KeyButton) (keyOf k) $
+                hBox [withAttr keyAttr $ txt k, txt $ " " <> d]
             ]
+
+-- | The key a hint names, if it names one.
+keyOf :: Text -> Maybe V.Key
+keyOf = \case
+    "enter" -> Just V.KEnter
+    "esc" -> Just V.KEsc
+    "⌫" -> Just V.KBS
+    "tab" -> Just $ V.KChar '\t'
+    "any key" -> Just V.KEsc
+    t | [c] <- T.unpack t -> Just $ V.KChar c
+    _ -> Nothing
 
 -- | The keys that act in the current state.
 keysFor :: State -> [(Text, Text)]

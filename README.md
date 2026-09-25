@@ -51,9 +51,11 @@ Press `?` for the keys of the current screen.
 
 The mouse works too: a click selects a row, a tab or a picker entry;
 a click on the selected profile asks to enable it, and on the selected
-picker entry picks it. The wheel moves the selection. Notifications are
-sent, and profiles deleted, only from the keyboard. With mouse mode on,
-most terminals select text with shift+drag.
+picker entry picks it. A click on a key hint, such as `y enable` or
+`esc cancel` in a dialog, presses that key, and a click on a form field
+focuses it. The wheel moves the selection. Notifications are sent only
+from the keyboard, and deleting still needs the ICCID digits typed.
+With mouse mode on, most terminals select text with shift+drag.
 
 | View | Keys |
 |---|---|

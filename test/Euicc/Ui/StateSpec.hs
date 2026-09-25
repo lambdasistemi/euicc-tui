@@ -321,6 +321,31 @@ spec = do
             s0 <- loaded
             let (s1, _) = click WheelDown s0
             stProfileCursor s1 `shouldBe` 1
+        it "enables on a click over the dialog's y button" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'e'] s0
+                (s2, j) = click (ClickKey (KChar 'y')) s1
+            stConfirm s2 `shouldBe` Nothing
+            j `shouldSatisfy` \case
+                Just (Enable _) -> True
+                _ -> False
+        it "closes the delete dialog on a click over esc" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'D'] s0
+                (s2, j) = click (ClickKey KEsc) s1
+            j `shouldBe` Nothing
+            fst <$> stDelete s2 `shouldBe` Nothing
+        it "focuses a form field on click" $ do
+            s0 <- loaded
+            let (s1, _) = press (KChar 'd') s0
+                (s2, j) = click (ClickField CodeField) s1
+            j `shouldBe` Nothing
+            formFocus (stForm s2) `shouldBe` CodeField
+        it "browses on a click over the focused QR field" $ do
+            s0 <- loaded
+            let (s1, _) = press (KChar 'g') s0
+                (_, j) = click (ClickField QrField) s1
+            j `shouldBe` Just (ReadDir ".")
         it "picks a QR image on a click over the selected entry" $ do
             s0 <- atListing
             let (s1, j1) = click (ClickPicker 1) s0

@@ -84,7 +84,7 @@ data Field
     = QrField
     | SmdpField
     | CodeField
-    deriving stock (Eq, Show)
+    deriving stock (Eq, Ord, Show)
 
 -- | The download form.
 data Form = Form
@@ -723,17 +723,23 @@ data Click
       ClickTab View
     | -- | left click on the picker entry with this index
       ClickPicker Int
+    | -- | left click on a form field
+      ClickField Field
+    | -- | left click on a key hint: the same as pressing the key
+      ClickKey Key
     | WheelUp
     | WheelDown
     deriving stock (Eq, Show)
 
 {- | React to a click. A click selects; a click on the profile or
 picker entry already selected acts like Enter, so every
-action keeps its keyboard confirmation. Notifications are sent
-only from the keyboard. Open dialogs ignore clicks.
+action keeps its confirmation. A click on a key hint presses
+that key, which is how dialogs take clicks. Notifications are
+sent only from the keyboard.
 -}
 handleClick :: Click -> State -> Step
 handleClick click s
+    | ClickKey k <- click = key k
     | stHelp s = Continue s{stHelp = False} Nothing
     | Just b <- stBrowser s = case click of
         ClickPicker i
@@ -768,7 +774,13 @@ handleClick click s
         (ProfilesView, WheelDown) -> key KDown
         (NotificationsView, WheelUp) -> key KUp
         (NotificationsView, WheelDown) -> key KDown
+        (DownloadView, ClickField f) -> onField f
+        (WizardView, ClickField f)
+            | Just WzSource <- wzPhase <$> stWizard s -> onField f
         _ -> ignore
   where
     key k = handleKey k [] s
+    onField f
+        | formFocus (stForm s) == f = key KEnter
+        | otherwise = Continue s{stForm = focus f $ stForm s} Nothing
     ignore = Continue s Nothing
