@@ -57,7 +57,7 @@ import Control.Concurrent (forkIO)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString qualified as B
-import Data.Char (toLower, toUpper)
+import Data.Char (toUpper)
 import Data.Foldable (traverse_)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -110,7 +110,6 @@ import Euicc.Ui.Theme
     )
 import Graphics.Vty qualified as V
 import Graphics.Vty.CrossPlatform (mkVty)
-import System.FilePath (takeExtension)
 import System.IO (hFlush, stdout)
 
 -- | A job finished on the worker thread.
@@ -776,19 +775,15 @@ browserLayer s = case stBrowser s of
   where
     entry selected i (isDir, name) =
         clickable (PickerEntry i)
-            $ withAttr (attrFor selected i isDir name)
+            $ withAttr (attrFor selected i isDir)
             $ padRight Max
             $ txt
             $ (if selected then "› " else "  ")
                 <> (if isDir then name <> "/" else name)
-    attrFor selected i isDir name
+    attrFor selected i isDir
         | selected = selectedAttr
         | isDir = dirAttr
-        | isImage name = rowAttr False i
-        | otherwise = dimAttr
-    isImage name =
-        map toLower (takeExtension $ T.unpack name)
-            `elem` [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]
+        | otherwise = rowAttr False i
     ellipsisLeft n p
         | length p <= n = p
         | otherwise = "…" <> reverse (take (n - 1) $ reverse p)

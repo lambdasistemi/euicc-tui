@@ -1,7 +1,7 @@
 module Euicc.JobSpec (spec) where
 
 import Data.IORef (modifyIORef, newIORef, readIORef)
-import Data.List (sort)
+import Data.List (isSuffixOf, sort)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Euicc.ActivationCode (DownloadTarget (..), mkSecret)
@@ -24,6 +24,7 @@ import Euicc.Lpac.Output
     )
 import Fixtures (fixture, fixtureOk)
 import System.Exit (ExitCode (..))
+import System.FilePath (isAbsolute, takeDirectory)
 import Test.Hspec
     ( Spec
     , describe
@@ -229,11 +230,20 @@ spec = do
             case resultDir r of
                 Nothing -> error "no directory listing in the result"
                 Just (cwd, entries) -> do
-                    cwd `shouldBe` "test/fixtures"
+                    cwd `shouldSatisfy` isAbsolute
+                    cwd `shouldSatisfy` ("/test/fixtures" `isSuffixOf`)
+                    takeDirectory cwd `shouldSatisfy` (/= cwd)
                     entryNames entries
                         `shouldContain` ["qr-lpa-ok.png", "qr-none.png"]
                     entryNames entries `shouldSatisfy` (\names -> names == sort names)
                     entries `shouldSatisfy` noDotEntries
+                    entryNames entries `shouldSatisfy` notElem "profile-list.stdout"
+        it "lists directories first, then images only" $ do
+            (r, _) <- runRecorded (const Nothing) (ReadDir "test")
+            case resultDir r of
+                Nothing -> error "no directory listing in the result"
+                Just (_, entries) ->
+                    entries `shouldBe` [(True, "Euicc"), (True, "fixtures")]
         it "reports a missing directory" $ do
             (r, cmds) <-
                 runRecorded (const Nothing) (ReadDir "no-such-dir")
