@@ -147,8 +147,6 @@ barAttr
     , plainAttr
     , stripeAttr
     , selectedAttr
-    , enabledAttr
-    , enabledStripeAttr
     , dimAttr
     , keyAttr
     , titleAttr
@@ -167,8 +165,6 @@ columnAttr = attrName "column"
 plainAttr = attrName "plain"
 stripeAttr = attrName "stripe"
 selectedAttr = attrName "selected"
-enabledAttr = attrName "enabled"
-enabledStripeAttr = attrName "enabledStripe"
 dimAttr = attrName "dim"
 keyAttr = attrName "key"
 titleAttr = attrName "title"
@@ -188,9 +184,6 @@ stripe = V.rgbColor (0xff :: Int) 0xff 0xd7
 paper :: V.Color
 paper = V.rgbColor (0xff :: Int) 0xff 0xff
 
--- | Readable green on the pale stripe.
-darkGreen :: V.Color
-darkGreen = V.rgbColor (0x00 :: Int) 0x64 0x00
 
 attributes :: AttrMap
 attributes =
@@ -203,8 +196,6 @@ attributes =
         , (plainAttr, V.black `on` paper)
         , (stripeAttr, V.black `on` stripe)
         , (selectedAttr, V.black `on` V.cyan `V.withStyle` V.bold)
-        , (enabledAttr, darkGreen `on` paper `V.withStyle` V.bold)
-        , (enabledStripeAttr, darkGreen `on` stripe `V.withStyle` V.bold)
         , (dimAttr, fg V.brightBlack)
         , (keyAttr, fg V.cyan `V.withStyle` V.bold)
         , (titleAttr, V.defAttr `V.withStyle` V.bold)
@@ -343,7 +334,7 @@ profilesTable s snap = case snapProfiles snap of
     widths = [3, 30, 22, 23, 10]
     profileRow :: Int -> Profile -> Widget ()
     profileRow i p =
-        withAttr (attrOf i p)
+        withAttr (rowAttr (i == stProfileCursor s) i)
             $ row
             $ zip
                 widths
@@ -353,10 +344,6 @@ profilesTable s snap = case snapProfiles snap of
                 , profileIccid p
                 , stateText $ profileState p
                 ]
-    attrOf i p
-        | i == stProfileCursor s = selectedAttr
-        | enabled p = if odd i then enabledStripeAttr else enabledAttr
-        | otherwise = rowAttr False i
     enabled p = profileState p == Enabled
     stateText = \case
         Enabled -> "enabled"
