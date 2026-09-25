@@ -19,6 +19,7 @@ stability:          experimental
 build-type:         Simple
 extra-doc-files:    README.md
 extra-source-files:
+  test/fixtures/*.png
   test/fixtures/*.stderr
   test/fixtures/*.stdout
 
@@ -55,10 +56,12 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Euicc.ActivationCode
+    Euicc.Dir
     Euicc.Job
     Euicc.Lpac.Command
     Euicc.Lpac.Output
     Euicc.Lpac.Process
+    Euicc.Qr
     Euicc.Ui.App
     Euicc.Ui.State
 
@@ -67,6 +70,8 @@ library
     , base               >=4.18   && <5
     , brick              >=2.1    && <2.11
     , bytestring         >=0.11   && <0.13
+    , directory          >=0.18   && <2
+    , filepath           >=1.4    && <1.6
     , text               >=2.0    && <2.2
     , typed-process      >=0.2.11 && <0.3
     , vty                >=6.0    && <6.6
@@ -91,6 +96,7 @@ test-suite unit-tests
     Euicc.JobSpec
     Euicc.Lpac.CommandSpec
     Euicc.Lpac.OutputSpec
+    Euicc.QrSpec
     Euicc.Ui.StateSpec
     Fixtures
 

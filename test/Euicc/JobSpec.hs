@@ -1,6 +1,8 @@
 module Euicc.JobSpec (spec) where
 
 import Data.IORef (modifyIORef, newIORef, readIORef)
+import Data.List (sort)
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Euicc.ActivationCode (DownloadTarget (..), mkSecret)
 import Euicc.Job
@@ -18,10 +20,18 @@ import Euicc.Lpac.Output
     , RawOutput
     , describeFailure
     , parseProfiles
+    , profileLabel
     )
 import Fixtures (fixture, fixtureOk)
 import System.Exit (ExitCode (..))
-import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
+import Test.Hspec
+    ( Spec
+    , describe
+    , it
+    , shouldBe
+    , shouldContain
+    , shouldSatisfy
+    )
 
 -- | A card that answers reads from fixtures and actions as given.
 fakeCard
@@ -53,8 +63,18 @@ disabledProfile = do
     Right [_, p] <- parseProfiles <$> fixtureOk "profile-list"
     pure p
 
+-- | The card state of a result, for assertions.
+snapOf :: JobResult -> Either LpacFailure Snapshot
+snapOf = fromMaybe (Left (UnexpectedOutput "no card read")) . resultSnapshot
+
 reads' :: [Command]
 reads' = [ReadChipInfo, ListProfiles, ListNotifications]
+
+entryNames :: [(Bool, T.Text)] -> [T.Text]
+entryNames = map snd
+
+noDotEntries :: [(Bool, T.Text)] -> Bool
+noDotEntries = all (\(_, name) -> name /= "." && name /= "..")
 
 spec :: Spec
 spec = do
@@ -62,18 +82,18 @@ spec = do
         it "reads chip info, profiles and notifications" $ do
             (r, cmds) <- runRecorded (const Nothing) Refresh
             cmds `shouldBe` reads'
-            fmap snapChip (resultSnapshot r)
+            fmap snapChip (snapOf r)
                 `shouldBe` Right
                     (ChipInfo "89049032000001000000000000000123" (Just 291740))
-            fmap (length . snapProfiles) (resultSnapshot r)
+            fmap (length . snapProfiles) (snapOf r)
                 `shouldBe` Right 2
-            fmap (length . snapNotifications) (resultSnapshot r)
+            fmap (length . snapNotifications) (snapOf r)
                 `shouldBe` Right 2
         it "reports a missing reader without crashing" $ do
             let runner = LpacRunner $ \_ ->
                     fixture (ExitFailure 255) "no-reader"
             r <- runJob runner Refresh
-            resultSnapshot r `shouldBe` Left NoReader
+            snapOf r `shouldBe` Left NoReader
     describe "Enable" $ do
         it "enables by ICCID, then reloads" $ do
             p <- disabledProfile
@@ -128,34 +148,116 @@ spec = do
                     (SendNotifications [7, 8])
             resultOutcome r
                 `shouldBe` Left (LpacError "es9p_handle_notification" "")
-            fmap (length . snapProfiles) (resultSnapshot r)
+            fmap (length . snapProfiles) (snapOf r)
                 `shouldBe` Right 2
+    describe "Delete" $ do
+        it "deletes by ICCID, then reloads" $ do
+            p <- disabledProfile
+            (r, cmds) <-
+                runRecorded
+                    ( \case
+                        DeleteProfile _ ->
+                            Just $ fixtureOk "profile-delete-ok"
+                        _ -> Nothing
+                    )
+                    (Delete p)
+            cmds `shouldBe` DeleteProfile (profileIccid p) : reads'
+            resultOutcome r `shouldSatisfy` \case
+                Right t -> ("Deleted " <> profileLabel p) `T.isPrefixOf` t
+                _ -> False
+    describe "Nickname" $ do
+        it "nicknames by ICCID, then reloads" $ do
+            p <- disabledProfile
+            (r, cmds) <-
+                runRecorded
+                    ( \case
+                        NicknameProfile _ _ ->
+                            Just $ fixtureOk "profile-nickname-ok"
+                        _ -> Nothing
+                    )
+                    (Nickname p "holiday")
+            cmds
+                `shouldBe` NicknameProfile (profileIccid p) "holiday" : reads'
+            resultOutcome r `shouldBe` Right ("Named " <> profileLabel p <> ".")
     describe "Download" $ do
         let target =
                 DownloadTarget
                     { targetSmdp = "smdp.example.com"
                     , targetMatchingId = mkSecret "SECRET-MATCHING-ID"
+                    , targetConfirmationRequired = False
                     }
         it "downloads from the given target" $ do
             (r, cmds) <-
                 runRecorded
                     ( \case
-                        DownloadProfile _ -> Just $ fixtureOk "download-ok"
+                        DownloadProfile _ _ -> Just $ fixtureOk "download-ok"
                         _ -> Nothing
                     )
-                    (Download target)
-            cmds `shouldBe` DownloadProfile target : reads'
+                    (Download target Nothing)
+            cmds `shouldBe` DownloadProfile target Nothing : reads'
+            resultOutcome r `shouldSatisfy` either (const False) (const True)
+        it "passes the confirmation code to lpac" $ do
+            (r, cmds) <-
+                runRecorded
+                    ( \case
+                        DownloadProfile _ _ -> Just $ fixtureOk "download-ok"
+                        _ -> Nothing
+                    )
+                    (Download target $ Just $ mkSecret "C-9")
+            take 1 cmds
+                `shouldBe` [DownloadProfile target (Just $ mkSecret "C-9")]
             resultOutcome r `shouldSatisfy` either (const False) (const True)
         it "never echoes the matching ID in a failure" $ do
             (r, _) <-
                 runRecorded
                     ( \case
-                        DownloadProfile _ ->
+                        DownloadProfile _ _ ->
                             Just $
                                 fixture (ExitFailure 255) "download-bad-code"
                         _ -> Nothing
                     )
-                    (Download target)
+                    (Download target Nothing)
             let shown = either describeFailure id $ resultOutcome r
             shown `shouldSatisfy` (not . T.isInfixOf "SECRET-MATCHING-ID")
             shown `shouldSatisfy` T.isInfixOf "refused"
+    describe "ReadDir" $ do
+        it "lists a directory without touching the card" $ do
+            (r, cmds) <-
+                runRecorded (const Nothing) (ReadDir "test/fixtures")
+            cmds `shouldBe` []
+            resultSnapshot r `shouldBe` Nothing
+            case resultDir r of
+                Nothing -> error "no directory listing in the result"
+                Just (cwd, entries) -> do
+                    cwd `shouldBe` "test/fixtures"
+                    entryNames entries
+                        `shouldContain` ["qr-lpa-ok.png", "qr-none.png"]
+                    entryNames entries `shouldSatisfy` (\names -> names == sort names)
+                    entries `shouldSatisfy` noDotEntries
+        it "reports a missing directory" $ do
+            (r, cmds) <-
+                runRecorded (const Nothing) (ReadDir "no-such-dir")
+            cmds `shouldBe` []
+            resultDir r `shouldBe` Nothing
+            resultOutcome r `shouldSatisfy` either (const True) (const False)
+    describe "DecodeQr" $ do
+        it "reads an image without touching the card" $ do
+            (r, cmds) <-
+                runRecorded
+                    (const Nothing)
+                    (DecodeQr "test/fixtures/qr-lpa-ok.png")
+            cmds `shouldBe` []
+            resultOutcome r `shouldBe` Right "QR code read."
+            resultSnapshot r `shouldBe` Nothing
+            fmap targetSmdp (resultQr r) `shouldBe` Just "qr-smdp.example.org"
+        it "reports an image without an activation code" $ do
+            (r, cmds) <-
+                runRecorded
+                    (const Nothing)
+                    (DecodeQr "test/fixtures/qr-not-lpa.png")
+            cmds `shouldBe` []
+            resultSnapshot r `shouldBe` Nothing
+            resultQr r `shouldBe` Nothing
+            resultOutcome r `shouldSatisfy` \case
+                Left (QrDecode _) -> True
+                _ -> False

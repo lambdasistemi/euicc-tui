@@ -9,7 +9,10 @@
 let
   scripts = {
     unit = {
-      runtimeInputs = [ components.tests.unit-tests ];
+      runtimeInputs = [
+        components.tests.unit-tests
+        pkgs.zbar
+      ];
       text = ''
         unit-tests
       '';

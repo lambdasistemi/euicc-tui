@@ -11,13 +11,17 @@ module Euicc.Lpac.Command
 -- License     : Apache-2.0
 --
 -- The closed set of @lpac@ commands the UI can issue. There is no
--- constructor for deleting or disabling a profile, nor for removing a
+-- constructor for disabling a profile, nor for removing a
 -- notification without sending it: those operations cannot be
 -- expressed.
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Euicc.ActivationCode (DownloadTarget (..), revealSecret)
+import Euicc.ActivationCode
+    ( DownloadTarget (..)
+    , Secret
+    , revealSecret
+    )
 
 -- | An @lpac@ invocation.
 data Command
@@ -25,12 +29,19 @@ data Command
     | ListProfiles
     | -- | enable the profile with this ICCID
       EnableProfile Text
+    | -- | delete the profile with this ICCID; the UI guards it
+      DeleteProfile Text
+    | -- | give the profile with this ICCID a nickname
+      NicknameProfile Text Text
     | ListNotifications
     | {- | send these notifications and drop each one the server
       accepted
       -}
       ProcessNotifications [Int]
-    | DownloadProfile DownloadTarget
+    | {- | download a profile, with the confirmation code the activation
+      code asked for, when it did
+      -}
+      DownloadProfile DownloadTarget (Maybe Secret)
     deriving stock (Eq, Show)
 
 -- | The argument vector passed to @lpac@.
@@ -39,10 +50,13 @@ commandArgs = \case
     ReadChipInfo -> ["chip", "info"]
     ListProfiles -> ["profile", "list"]
     EnableProfile iccid -> ["profile", "enable", T.unpack iccid]
+    DeleteProfile iccid -> ["profile", "delete", T.unpack iccid]
+    NicknameProfile iccid nickname ->
+        ["profile", "nickname", T.unpack iccid, T.unpack nickname]
     ListNotifications -> ["notification", "list"]
     ProcessNotifications seqs ->
         ["notification", "process", "-r"] <> map show seqs
-    DownloadProfile DownloadTarget{..} ->
+    DownloadProfile DownloadTarget{..} confirmation ->
         [ "profile"
         , "download"
         , "-s"
@@ -50,6 +64,10 @@ commandArgs = \case
         , "-m"
         , T.unpack $ revealSecret targetMatchingId
         ]
+            <> confirmArg confirmation
+  where
+    confirmArg (Just code) = ["-c", T.unpack $ revealSecret code]
+    confirmArg Nothing = []
 
 {- | The environment for @lpac@: the given one with @LPAC_APDU@ forced
 to @pcsc@.

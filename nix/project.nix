@@ -26,6 +26,7 @@ pkgs.haskell-nix.cabalProject' {
       pkgs.just
       pkgs.nixfmt
       pkgs.lpac
+      pkgs.zbar
       pkgs.haskellPackages.cabal-fmt
     ];
   };

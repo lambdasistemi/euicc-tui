@@ -5,17 +5,25 @@ module Euicc.Ui.State
     , Form (..)
     , Field (..)
     , Status (..)
+    , Wizard (..)
+    , WizardPhase (..)
+    , Browser (..)
+    , confirmDisplay
+    , deleteCheck
     , emptyForm
 
       -- * Transitions
     , Step (..)
     , start
     , handleKey
+    , Click (..)
+    , handleClick
     , finishJob
 
       -- * Queries
     , selectedProfile
     , selectedNotification
+    , typing
     , codeDisplay
     , smdpDisplay
     ) where
@@ -32,12 +40,20 @@ module Euicc.Ui.State
 -- without hardware.
 --
 -- While a job runs the state is busy and no further job is started.
--- There is no key that deletes or disables a profile.
+-- There is no key that disables a profile. Deleting takes @D@ on a
+-- disabled profile and the last digits of its ICCID typed back.
+import Control.Applicative ((<|>))
 
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Euicc.ActivationCode (mask, resolveDownloadInput)
+import Euicc.ActivationCode
+    ( DownloadTarget (..)
+    , mask
+    , mkSecret
+    , resolveDownloadInput
+    , revealSecret
+    )
 import Euicc.Job
     ( Job (..)
     , JobResult (..)
@@ -53,45 +69,94 @@ import Euicc.Lpac.Output
     , profileLabel
     )
 import Graphics.Vty (Key (..), Modifier (..))
+import System.FilePath (takeDirectory, (</>))
 
 -- | Which screen is shown.
 data View
     = ProfilesView
     | NotificationsView
     | DownloadView
-    deriving stock (Eq, Show)
+    | WizardView
+    deriving stock (Eq, Ord, Show)
 
--- | The two fields of the download form.
+-- | The fields of the download form, in tab order.
 data Field
-    = SmdpField
+    = QrField
+    | SmdpField
     | CodeField
     deriving stock (Eq, Show)
 
 -- | The download form.
 data Form = Form
-    { formSmdp :: Text
+    { formQr :: Text
+    -- ^ path to a QR image, read on Enter
+    , formSmdp :: Text
     , formCode :: Text
     , formFocus :: Field
+    , formConfirmation :: Bool
+    -- ^ the QR code read into the form asks for a confirmation code
     }
     deriving stock (Eq)
 
 -- | The code is never shown, not even inside the address field.
 instance Show Form where
     show form@Form{formFocus} =
-        "Form {formSmdp = "
+        "Form {formQr = "
+            <> show (formQr form)
+            <> ", formSmdp = "
             <> show (smdpDisplay form)
             <> ", formCode = <redacted>, formFocus = "
             <> show formFocus
+            <> ", formConfirmation = "
+            <> show (formConfirmation form)
             <> "}"
 
 -- | A form with nothing typed.
 emptyForm :: Form
-emptyForm = Form{formSmdp = "", formCode = "", formFocus = SmdpField}
+emptyForm =
+    Form
+        { formQr = ""
+        , formSmdp = ""
+        , formCode = ""
+        , formFocus = SmdpField
+        , formConfirmation = False
+        }
 
 -- | The message line.
 data Status
     = Info Text
     | Failure Text
+    deriving stock (Eq, Show)
+
+-- | Where a guided install stands.
+data WizardPhase
+    = -- | QR image path, SM-DP+ address and activation code
+      WzSource
+    | -- | the QR code was read; Enter installs what it holds
+      WzReady
+    | -- | the activation code asks for a confirmation code
+      WzConfirm
+    deriving stock (Eq, Show)
+
+-- | The state of a guided install.
+data Wizard = Wizard
+    { wzPhase :: WizardPhase
+    , wzKnownIccids :: [Text]
+    {- ^ the profiles that existed before the download; the new plan
+    is the one that appears besides them
+    -}
+    , wzConfirmInput :: Text
+    -- ^ the confirmation code while it is typed; cleared on submit
+    }
+    deriving stock (Eq, Show)
+
+-- | A directory listing being browsed for a QR image.
+data Browser = Browser
+    { brCwd :: FilePath
+    , brItems :: [(Bool, Text)]
+    -- ^ each entry: is it a directory, and its name
+    , brCursor :: Int
+    }
     deriving stock (Eq, Show)
 
 -- | The whole UI state.
@@ -104,6 +169,18 @@ data State = State
     , stForm :: Form
     , stConfirm :: Maybe Profile
     -- ^ a profile waiting for y/n before being enabled
+    , stNicknameEdit :: Maybe (Profile, Text)
+    -- ^ a profile waiting for a nickname to be typed
+    , stDelete :: Maybe (Profile, Text)
+    {- ^ a profile waiting for the last digits of its ICCID before
+    being deleted
+    -}
+    , stWizard :: Maybe Wizard
+    -- ^ a guided install in progress
+    , stBrowser :: Maybe Browser
+    -- ^ a directory listing being picked from
+    , stHelp :: Bool
+    -- ^ the key overlay is shown
     , stBusy :: Maybe Job
     -- ^ the job in flight
     , stStatus :: Maybe Status
@@ -128,6 +205,11 @@ start =
         , stNotificationCursor = 0
         , stForm = emptyForm
         , stConfirm = Nothing
+        , stNicknameEdit = Nothing
+        , stDelete = Nothing
+        , stWizard = Nothing
+        , stBrowser = Nothing
+        , stHelp = False
         , stBusy = Just Refresh
         , stStatus = Nothing
         }
@@ -138,13 +220,86 @@ start =
 handleKey :: Key -> [Modifier] -> State -> Step
 handleKey key mods s
     | key == KChar 'c' && MCtrl `elem` mods = Halt
+    | stHelp s = continue s{stHelp = False}
+    | key == KChar '?' = continue s{stHelp = True}
+    | Just b <- stBrowser s = browsing b
+    | Just (p, t) <- stDelete s = deleting p t
+    | Just (p, t) <- stNicknameEdit s = nicknaming p t
     | Just p <- stConfirm s = confirming p
     | otherwise = case stView s of
         ProfilesView -> profiles
         NotificationsView -> notifications
         DownloadView -> download
+        WizardView -> wizard
   where
     continue s' = Continue s' Nothing
+    browsing b = case key of
+        KUp -> continue $ moveBrowser (-1)
+        KChar 'k' -> continue $ moveBrowser (-1)
+        KDown -> continue $ moveBrowser 1
+        KChar 'j' -> continue $ moveBrowser 1
+        KBS -> launch (ReadDir $ takeDirectory $ brCwd b) s
+        KEsc -> continue s{stBrowser = Nothing}
+        KEnter -> case drop (brCursor b) $ brItems b of
+            (isDir, name) : _
+                | isDir ->
+                    launch (ReadDir $ brCwd b </> T.unpack name) s
+                | otherwise ->
+                    launch
+                        (DecodeQr path)
+                        s
+                            { stBrowser = Nothing
+                            , stForm = (stForm s){formQr = T.pack path}
+                            }
+              where
+                path = brCwd b </> T.unpack name
+            [] -> continue s
+        _ -> continue s
+      where
+        moveBrowser d =
+            s
+                { stBrowser =
+                    (\br -> br{brCursor = clamp (length $ brItems br) $ brCursor br + d})
+                        <$> stBrowser s
+                }
+    nicknaming p t = case key of
+        KEnter
+            | T.null (T.strip t) -> cancelNickname
+            | otherwise ->
+                launch (Nickname p (T.strip t)) s{stNicknameEdit = Nothing}
+        KEsc -> cancelNickname
+        KBS -> continue s{stNicknameEdit = Just (p, T.dropEnd 1 t)}
+        KChar c -> continue s{stNicknameEdit = Just (p, T.snoc t c)}
+        _ -> continue s
+      where
+        cancelNickname = continue s{stNicknameEdit = Nothing}
+    deleting p t = case key of
+        KEnter
+            | T.strip t == deleteCheck p ->
+                launch (Delete p) s{stDelete = Nothing}
+            | otherwise -> cancelDelete
+        KEsc -> cancelDelete
+        KBS -> continue s{stDelete = Just (p, T.dropEnd 1 t)}
+        KChar c -> continue s{stDelete = Just (p, T.snoc t c)}
+        _ -> continue s
+      where
+        cancelDelete =
+            continue
+                s{stDelete = Nothing, stStatus = Just $ Info "Not deleted."}
+    askDelete = case selectedProfile s of
+        Nothing -> continue s
+        Just p
+            | profileState p == Enabled ->
+                continue
+                    s
+                        { stStatus =
+                            Just
+                                $ Info
+                                $ profileLabel p
+                                    <> " is enabled; enable another \
+                                       \plan before deleting it."
+                        }
+            | otherwise -> continue s{stDelete = Just (p, "")}
     confirming p = case key of
         KChar 'y' -> launch (Enable p) s{stConfirm = Nothing}
         _ ->
@@ -160,6 +315,16 @@ handleKey key mods s
         KChar 'r' -> launch Refresh s
         KChar 'n' -> switchTo NotificationsView
         KChar 'd' -> switchTo DownloadView
+        KChar 'g' -> openWizard
+        KChar 'D' -> askDelete
+        KChar 'm' -> case selectedProfile s of
+            Nothing -> continue s
+            Just p ->
+                continue
+                    s
+                        { stNicknameEdit =
+                            Just (p, fromMaybe "" $ profileNickname p)
+                        }
         _ -> continue s
     notifications = case key of
         KChar 'q' -> Halt
@@ -184,7 +349,7 @@ handleKey key mods s
         KEsc ->
             continue
                 s{stView = ProfilesView, stForm = emptyForm}
-        KEnter -> submit
+        KEnter -> formEnter
         KChar '\t' -> continue $ onForm switchField
         KBackTab -> continue $ onForm switchField
         KUp -> continue $ onForm switchField
@@ -202,14 +367,117 @@ handleKey key mods s
                             Just $ Info $ profileLabel p <> " is already enabled."
                         }
             | otherwise -> continue s{stConfirm = Just p}
+    wizard = case wzPhase $ wizardOf s of
+        WzSource -> case key of
+            KEsc -> closeWizard s
+            KChar '\t' -> continue $ onForm switchField
+            KBackTab -> continue $ onForm switchField
+            KUp -> continue $ onForm switchField
+            KDown -> continue $ onForm switchField
+            KBS -> continue $ onForm $ editField $ T.dropEnd 1
+            KChar c -> continue $ onForm $ editField (`T.snoc` c)
+            KEnter -> formEnter
+            _ -> continue s
+        WzReady -> case key of
+            KEsc -> closeWizard s
+            KEnter -> submit
+            _ -> continue s
+        WzConfirm -> case key of
+            KEsc -> closeWizard s
+            KBS -> continue s{stWizard = editConfirm <$> stWizard s}
+            KChar c ->
+                continue s{stWizard = (`snocConfirm` c) <$> stWizard s}
+            KEnter
+                | T.null (T.strip $ wzConfirmInput $ wizardOf s) ->
+                    continue
+                        s{stStatus = Just $ Info "Type the confirmation code."}
+                | otherwise ->
+                    case confirmed (formConfirmation $ stForm s)
+                        <$> resolveDownloadInput
+                            (formSmdp $ stForm s)
+                            (formCode $ stForm s) of
+                        Left err -> continue s{stStatus = Just $ Failure err}
+                        Right target ->
+                            launch
+                                ( Download target
+                                    $ Just
+                                    $ mkSecret
+                                    $ T.strip
+                                    $ wzConfirmInput
+                                    $ wizardOf s
+                                )
+                                s
+                                    { stForm = emptyForm
+                                    , stWizard =
+                                        (\w -> w{wzConfirmInput = ""})
+                                            <$> stWizard s
+                                    }
+            _ -> continue s
+    formEnter = case formFocus $ stForm s of
+        QrField
+            | T.null (T.strip $ formQr $ stForm s) ->
+                launch
+                    (ReadDir ".")
+                    s{stBrowser = Just $ Browser "" [] 0}
+            | otherwise ->
+                launch
+                    (DecodeQr $ T.unpack $ T.strip $ formQr $ stForm s)
+                    s
+        SmdpField -> continue $ onForm focusCode
+        CodeField -> submit
+    openWizard = case snapshotOf s of
+        Nothing ->
+            continue s{stStatus = Just $ Info "Read the card first (r)."}
+        Just snap ->
+            continue
+                s
+                    { stView = WizardView
+                    , stForm = emptyForm{formFocus = QrField}
+                    , stWizard =
+                        Just
+                            Wizard
+                                { wzPhase = WzSource
+                                , wzKnownIccids =
+                                    map profileIccid $ snapProfiles snap
+                                , wzConfirmInput = ""
+                                }
+                    }
+    closeWizard st = Continue (leaveWizard st) Nothing
+    wizardOf st = case stWizard st of
+        Just w -> w
+        Nothing -> Wizard WzSource [] ""
     submit =
-        let Form{formSmdp, formCode} = stForm s
-        in  case resolveDownloadInput formSmdp formCode of
+        let Form{formSmdp, formCode, formConfirmation} = stForm s
+        in  case confirmed formConfirmation <$> resolveDownloadInput formSmdp formCode of
                 Left err -> continue s{stStatus = Just $ Failure err}
-                Right target ->
-                    launch
-                        (Download target)
-                        s{stForm = emptyForm, stView = ProfilesView}
+                Right target
+                    | targetConfirmationRequired target
+                    , Just w <- stWizard s ->
+                        continue
+                            s
+                                { stWizard = Just w{wzPhase = WzConfirm}
+                                , stStatus =
+                                    Just $
+                                        Info
+                                            "This code asks for a \
+                                            \confirmation code."
+                                }
+                    | targetConfirmationRequired target ->
+                        continue
+                            s
+                                { stStatus =
+                                    Just $
+                                        Failure
+                                            "This code asks for a \
+                                            \confirmation code; use the \
+                                            \guided install (g)."
+                                }
+                    | Just _ <- stWizard s ->
+                        launch (Download target Nothing) s{stForm = emptyForm}
+                    | otherwise ->
+                        launch
+                            (Download target Nothing)
+                            s{stForm = emptyForm, stView = ProfilesView}
     onForm f = s{stForm = f $ stForm s}
     switchTo view = case snapshotOf s of
         Just _ -> continue s{stView = view}
@@ -235,15 +503,23 @@ handleKey key mods s
         | otherwise = Continue s'{stBusy = Just job} $ Just job
 
 switchField :: Form -> Form
-switchField f = f{formFocus = other $ formFocus f}
+switchField f = f{formFocus = next $ formFocus f}
   where
-    other SmdpField = CodeField
-    other CodeField = SmdpField
+    next QrField = SmdpField
+    next SmdpField = CodeField
+    next CodeField = QrField
 
 editField :: (Text -> Text) -> Form -> Form
 editField edit f = case formFocus f of
+    QrField -> f{formQr = edit $ formQr f}
     SmdpField -> f{formSmdp = edit $ formSmdp f}
     CodeField -> f{formCode = edit $ formCode f}
+
+{- | What the confirmation-code field of the wizard shows: one @*@ per
+character.
+-}
+confirmDisplay :: Wizard -> Text
+confirmDisplay = mask . wzConfirmInput
 
 -- | Keep a cursor within a list of the given length.
 clamp :: Int -> Int -> Int
@@ -260,25 +536,121 @@ profilesOf = maybe [] snapProfiles . snapshotOf
 notificationsOf :: State -> [Notification]
 notificationsOf = maybe [] snapNotifications . snapshotOf
 
--- | Record a finished job.
-finishJob :: JobResult -> State -> State
+{- | Record a finished job, starting the next job of a guided
+install when there is one.
+-}
+finishJob :: JobResult -> State -> (State, Maybe Job)
 finishJob JobResult{..} s =
-    let s' =
-            s
+    let filled0 = case resultQr of
+            Just target -> fillFrom target s
+            Nothing -> s
+        filled = case (resultDir, stBrowser filled0) of
+            (Just (cwd, items), Just _) ->
+                filled0{stBrowser = Just $ Browser cwd items 0}
+            _ -> filled0
+        s1 =
+            filled
                 { stBusy = Nothing
-                , stCard = Just resultSnapshot
+                , stCard = resultSnapshot <|> stCard filled
                 , stStatus = case (resultOutcome, resultSnapshot) of
-                    (Left f, Left g) | f == g -> Nothing
+                    (Left f, Just (Left g)) | f == g -> Nothing
                     (Left f, _) -> Just $ Failure $ describeFailure f
                     (Right msg, _) -> Just $ Info msg
                 }
-    in  s'
-            { stProfileCursor =
-                clamp (length $ profilesOf s') $ stProfileCursor s'
-            , stNotificationCursor =
-                clamp (length $ notificationsOf s') $
-                    stNotificationCursor s'
-            }
+        s2 =
+            s1
+                { stProfileCursor =
+                    clamp (length $ profilesOf s1) $ stProfileCursor s1
+                , stNotificationCursor =
+                    clamp (length $ notificationsOf s1) $
+                        stNotificationCursor s1
+                }
+    in  advanceWizard resultJob resultOutcome resultSnapshot s2
+
+{- | Move a guided install forward after one of its jobs finished.
+A read QR code waits for Enter; a finished download, good or bad,
+returns to the profile list.
+-}
+advanceWizard
+    :: Job
+    -> Either LpacFailure Text
+    -> Maybe (Either LpacFailure Snapshot)
+    -> State
+    -> (State, Maybe Job)
+advanceWizard job outcome snapshot s = case stWizard s of
+    Nothing -> (s, Nothing)
+    Just w -> case job of
+        -- Reading the QR is part of the source step; its failure
+        -- leaves the wizard where it is.
+        DecodeQr _ -> case outcome of
+            Right _ ->
+                ( s
+                    { stWizard = Just w{wzPhase = WzReady}
+                    , stStatus = Just $ Info "QR code read."
+                    }
+                , Nothing
+                )
+            Left _ -> (s, Nothing)
+        Download _ _ -> case (outcome, newProfileOf w snapshot) of
+            (Right _, [p]) ->
+                ( (leaveWizard s)
+                    { stProfileCursor =
+                        length $ takeWhile ((/= profileIccid p) . profileIccid) $ profilesOf s
+                    , stStatus =
+                        Just
+                            $ Info
+                            $ "Installed "
+                                <> profileLabel p
+                                <> ". e enables it, m names it."
+                    }
+                , Nothing
+                )
+            _ -> (leaveWizard s, Nothing)
+        _ -> (s, Nothing)
+
+-- | Close the guided install, back to the profile list.
+leaveWizard :: State -> State
+leaveWizard s =
+    s
+        { stView = ProfilesView
+        , stForm = emptyForm
+        , stWizard = Nothing
+        }
+
+-- | The profiles that appeared with the latest card read.
+newProfileOf
+    :: Wizard -> Maybe (Either LpacFailure Snapshot) -> [Profile]
+newProfileOf w = \case
+    Just (Right snap) ->
+        filter
+            (\p -> profileIccid p `notElem` wzKnownIccids w)
+            $ snapProfiles snap
+    _ -> []
+
+-- | Put a decoded activation code into the form, masked.
+fillFrom :: DownloadTarget -> State -> State
+fillFrom target s =
+    s
+        { stForm =
+            (stForm s)
+                { formSmdp = targetSmdp target
+                , formCode = revealSecret $ targetMatchingId target
+                , formFocus = CodeField
+                , formConfirmation = targetConfirmationRequired target
+                }
+        }
+
+focus :: Field -> Form -> Form
+focus f form = form{formFocus = f}
+
+focusCode :: Form -> Form
+focusCode = focus CodeField
+
+editConfirm :: Wizard -> Wizard
+editConfirm w = w{wzConfirmInput = T.dropEnd 1 $ wzConfirmInput w}
+
+snocConfirm :: Wizard -> Char -> Wizard
+snocConfirm w c = w{wzConfirmInput = T.snoc (wzConfirmInput w) c}
 
 -- | The profile under the cursor.
 selectedProfile :: State -> Maybe Profile
@@ -310,3 +682,93 @@ smdpDisplay Form{formSmdp}
     maskFrom i segment
         | i >= 2 = mask segment
         | otherwise = segment
+
+-- | Carry a QR code's confirmation flag into the target the form builds.
+confirmed :: Bool -> DownloadTarget -> DownloadTarget
+confirmed flag target =
+    target
+        { targetConfirmationRequired =
+            flag || targetConfirmationRequired target
+        }
+
+{- | What must be typed to delete a profile: the last four digits of
+its ICCID.
+-}
+deleteCheck :: Profile -> Text
+deleteCheck = T.takeEnd 4 . profileIccid
+
+{- | Whether keys go into a text field, so the bottom line shows
+the field keys.
+-}
+typing :: State -> Bool
+typing s = case (stNicknameEdit s, stDelete s) of
+    (Just _, _) -> True
+    (_, Just _) -> True
+    _
+        | Just _ <- stBrowser s -> False
+        | otherwise -> case stView s of
+            DownloadView -> True
+            WizardView -> case wzPhase <$> stWizard s of
+                Just WzReady -> False
+                _ -> True
+            _ -> False
+
+-- | A mouse action, already resolved to what was under the pointer.
+data Click
+    = -- | left click on the profile row with this index
+      ClickProfile Int
+    | -- | left click on the notification row with this index
+      ClickNotification Int
+    | -- | left click on a tab
+      ClickTab View
+    | -- | left click on the picker entry with this index
+      ClickPicker Int
+    | WheelUp
+    | WheelDown
+    deriving stock (Eq, Show)
+
+{- | React to a click. A click selects; a click on the profile or
+picker entry already selected acts like Enter, so every
+action keeps its keyboard confirmation. Notifications are sent
+only from the keyboard. Open dialogs ignore clicks.
+-}
+handleClick :: Click -> State -> Step
+handleClick click s
+    | stHelp s = Continue s{stHelp = False} Nothing
+    | Just b <- stBrowser s = case click of
+        ClickPicker i
+            | i == brCursor b -> key KEnter
+            | otherwise ->
+                Continue
+                    s{stBrowser = Just b{brCursor = clamp (length $ brItems b) i}}
+                    Nothing
+        WheelUp -> key KUp
+        WheelDown -> key KDown
+        _ -> ignore
+    | Just _ <- stDelete s = ignore
+    | Just _ <- stNicknameEdit s = ignore
+    | Just _ <- stConfirm s = ignore
+    | otherwise = case (stView s, click) of
+        (ProfilesView, ClickProfile i)
+            | i == stProfileCursor s -> key KEnter
+            | otherwise ->
+                Continue
+                    s{stProfileCursor = clamp (length $ profilesOf s) i}
+                    Nothing
+        (NotificationsView, ClickNotification i) ->
+            Continue
+                s
+                    { stNotificationCursor =
+                        clamp (length $ notificationsOf s) i
+                    }
+                Nothing
+        (ProfilesView, ClickTab NotificationsView) -> key (KChar 'n')
+        (NotificationsView, ClickTab ProfilesView) -> key (KChar 'p')
+        (ProfilesView, WheelUp) -> key KUp
+        (ProfilesView, WheelDown) -> key KDown
+        (NotificationsView, WheelUp) -> key KUp
+        (NotificationsView, WheelDown) -> key KDown
+        _ -> ignore
+  where
+    key k = handleKey k [] s
+    ignore = Continue s Nothing
