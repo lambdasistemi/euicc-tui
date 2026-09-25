@@ -2,8 +2,17 @@ module Euicc.Ui.StateSpec (spec) where
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Euicc.ActivationCode (DownloadTarget (..), revealSecret)
-import Euicc.Job (Job (..), Snapshot (..), jobResult)
+import Euicc.ActivationCode
+    ( DownloadTarget (..)
+    , mkSecret
+    , revealSecret
+    )
+import Euicc.Job
+    ( Job (..)
+    , JobResult (..)
+    , Snapshot (..)
+    , jobResult
+    )
 import Euicc.Lpac.Output
     ( ChipInfo (..)
     , LpacFailure (..)
@@ -204,6 +213,56 @@ spec = do
             stView (fst $ pressAll [KChar 'n', KEsc] s0)
                 `shouldBe` ProfilesView
     describe "guided install" $ do
+        it "reads a QR image from the first field on Enter" $ do
+            s0 <- loaded
+            let keys =
+                    [KChar 'g']
+                        <> typeText "plan.png"
+                        <> [KEnter]
+                (s1, js) = pressAll keys s0
+            js `shouldBe` [DecodeQr "plan.png"]
+            stStatus s1 `shouldSatisfy` \case
+                Just (Info _) -> True
+                _ -> False
+        it "fills the form from a decoded QR code, masked" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'g', KEnter] s0
+                target =
+                    DownloadTarget
+                        { targetSmdp = "qr-smdp.example.org"
+                        , targetMatchingId = mkSecret "QR-MATCH-7X"
+                        , targetConfirmationRequired = False
+                        }
+                s2 =
+                    finishJob
+                        JobResult
+                            { resultJob = DecodeQr "plan.png"
+                            , resultOutcome = Right "QR code read."
+                            , resultSnapshot = Nothing
+                            , resultQr = Just target
+                            }
+                        s1
+            formSmdp (stForm s2) `shouldBe` "qr-smdp.example.org"
+            formCode (stForm s2) `shouldBe` "QR-MATCH-7X"
+            codeDisplay (stForm s2) `shouldBe` "***********"
+            formFocus (stForm s2) `shouldBe` CodeField
+            stView s2 `shouldBe` WizardView
+        it "shows a QR failure without leaving the wizard" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'g', KEnter] s0
+                s2 =
+                    finishJob
+                        ( jobResult
+                            (DecodeQr "plan.png")
+                            (Left $ QrDecode "no QR code found in this image.")
+                            Nothing
+                        )
+                        s1
+            stView s2 `shouldBe` WizardView
+            fmap wzPhase (stWizard s2) `shouldBe` Just WzSource
+            stStatus s2 `shouldSatisfy` \case
+                Just (Failure _) -> True
+                _ -> False
         it "opens on g, remembering the card's ICCIDs" $ do
             s0 <- loaded
             let (s1, js) = pressAll [KChar 'g'] s0

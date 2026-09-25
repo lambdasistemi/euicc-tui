@@ -40,7 +40,12 @@ module Euicc.Ui.State
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Euicc.ActivationCode (mask, resolveDownloadInput)
+import Euicc.ActivationCode
+    ( DownloadTarget (..)
+    , mask
+    , resolveDownloadInput
+    , revealSecret
+    )
 import Euicc.Job
     ( Job (..)
     , JobResult (..)
@@ -65,15 +70,18 @@ data View
     | WizardView
     deriving stock (Eq, Show)
 
--- | The two fields of the download form.
+-- | The fields of the download form, in tab order.
 data Field
-    = SmdpField
+    = QrField
+    | SmdpField
     | CodeField
     deriving stock (Eq, Show)
 
 -- | The download form.
 data Form = Form
-    { formSmdp :: Text
+    { formQr :: Text
+    -- ^ path to a QR image, read on Enter
+    , formSmdp :: Text
     , formCode :: Text
     , formFocus :: Field
     }
@@ -82,7 +90,9 @@ data Form = Form
 -- | The code is never shown, not even inside the address field.
 instance Show Form where
     show form@Form{formFocus} =
-        "Form {formSmdp = "
+        "Form {formQr = "
+            <> show (formQr form)
+            <> ", formSmdp = "
             <> show (smdpDisplay form)
             <> ", formCode = <redacted>, formFocus = "
             <> show formFocus
@@ -90,7 +100,13 @@ instance Show Form where
 
 -- | A form with nothing typed.
 emptyForm :: Form
-emptyForm = Form{formSmdp = "", formCode = "", formFocus = SmdpField}
+emptyForm =
+    Form
+        { formQr = ""
+        , formSmdp = ""
+        , formCode = ""
+        , formFocus = SmdpField
+        }
 
 -- | The message line.
 data Status
@@ -219,7 +235,7 @@ handleKey key mods s
         KEsc ->
             continue
                 s{stView = ProfilesView, stForm = emptyForm}
-        KEnter -> submit
+        KEnter -> formEnter
         KChar '\t' -> continue $ onForm switchField
         KBackTab -> continue $ onForm switchField
         KUp -> continue $ onForm switchField
@@ -246,7 +262,7 @@ handleKey key mods s
             KDown -> continue $ onForm switchField
             KBS -> continue $ onForm $ editField $ T.dropEnd 1
             KChar c -> continue $ onForm $ editField (`T.snoc` c)
-            KEnter -> submit
+            KEnter -> formEnter
             _ -> continue s
         WzConfirm -> case key of
             KEsc -> closeWizard s
@@ -258,6 +274,16 @@ handleKey key mods s
             KEsc -> closeWizard s
             KEnter -> closeWizard s
             _ -> continue s
+    formEnter = case formFocus $ stForm s of
+        QrField
+            | T.null (T.strip $ formQr $ stForm s) ->
+                continue $ onForm $ focus SmdpField
+            | otherwise ->
+                launch
+                    (DecodeQr $ T.unpack $ T.strip $ formQr $ stForm s)
+                    s
+        SmdpField -> continue $ onForm focusCode
+        CodeField -> submit
     openWizard = case snapshotOf s of
         Nothing ->
             continue s{stStatus = Just $ Info "Read the card first (r)."}
@@ -265,7 +291,7 @@ handleKey key mods s
             continue
                 s
                     { stView = WizardView
-                    , stForm = emptyForm
+                    , stForm = emptyForm{formFocus = QrField}
                     , stWizard =
                         Just
                             Wizard
@@ -321,13 +347,15 @@ handleKey key mods s
         | otherwise = Continue s'{stBusy = Just job} $ Just job
 
 switchField :: Form -> Form
-switchField f = f{formFocus = other $ formFocus f}
+switchField f = f{formFocus = next $ formFocus f}
   where
-    other SmdpField = CodeField
-    other CodeField = SmdpField
+    next QrField = SmdpField
+    next SmdpField = CodeField
+    next CodeField = QrField
 
 editField :: (Text -> Text) -> Form -> Form
 editField edit f = case formFocus f of
+    QrField -> f{formQr = edit $ formQr f}
     SmdpField -> f{formSmdp = edit $ formSmdp f}
     CodeField -> f{formCode = edit $ formCode f}
 
@@ -355,10 +383,13 @@ notificationsOf = maybe [] snapNotifications . snapshotOf
 -- | Record a finished job.
 finishJob :: JobResult -> State -> State
 finishJob JobResult{..} s =
-    let s' =
-            s
+    let filled = case resultQr of
+            Just target -> fillFrom target s
+            Nothing -> s
+        s' =
+            filled
                 { stBusy = Nothing
-                , stCard = maybe (stCard s) Just resultSnapshot
+                , stCard = maybe (stCard filled) Just resultSnapshot
                 , stStatus = case (resultOutcome, resultSnapshot) of
                     (Left f, Just (Left g)) | f == g -> Nothing
                     (Left f, _) -> Just $ Failure $ describeFailure f
@@ -371,6 +402,24 @@ finishJob JobResult{..} s =
                 clamp (length $ notificationsOf s') $
                     stNotificationCursor s'
             }
+
+-- | Put a decoded activation code into the form, masked.
+fillFrom :: DownloadTarget -> State -> State
+fillFrom target s =
+    s
+        { stForm =
+            (stForm s)
+                { formSmdp = targetSmdp target
+                , formCode = revealSecret $ targetMatchingId target
+                , formFocus = CodeField
+                }
+        }
+
+focus :: Field -> Form -> Form
+focus f form = form{formFocus = f}
+
+focusCode :: Form -> Form
+focusCode = focus CodeField
 
 -- | The profile under the cursor.
 selectedProfile :: State -> Maybe Profile
