@@ -141,22 +141,22 @@ spec = do
             (r, cmds) <-
                 runRecorded
                     ( \case
-                        DownloadProfile _ -> Just $ fixtureOk "download-ok"
+                        DownloadProfile _ _ -> Just $ fixtureOk "download-ok"
                         _ -> Nothing
                     )
-                    (Download target)
-            cmds `shouldBe` DownloadProfile target : reads'
+                    (Download target Nothing)
+            cmds `shouldBe` DownloadProfile target Nothing : reads'
             resultOutcome r `shouldSatisfy` either (const False) (const True)
         it "never echoes the matching ID in a failure" $ do
             (r, _) <-
                 runRecorded
                     ( \case
-                        DownloadProfile _ ->
+                        DownloadProfile _ _ ->
                             Just $
                                 fixture (ExitFailure 255) "download-bad-code"
                         _ -> Nothing
                     )
-                    (Download target)
+                    (Download target Nothing)
             let shown = either describeFailure id $ resultOutcome r
             shown `shouldSatisfy` (not . T.isInfixOf "SECRET-MATCHING-ID")
             shown `shouldSatisfy` T.isInfixOf "refused"

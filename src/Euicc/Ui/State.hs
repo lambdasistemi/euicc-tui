@@ -208,7 +208,7 @@ handleKey key mods s
                 Left err -> continue s{stStatus = Just $ Failure err}
                 Right target ->
                     launch
-                        (Download target)
+                        (Download target Nothing)
                         s{stForm = emptyForm, stView = ProfilesView}
     onForm f = s{stForm = f $ stForm s}
     switchTo view = case snapshotOf s of

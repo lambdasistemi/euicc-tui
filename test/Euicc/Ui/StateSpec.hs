@@ -295,7 +295,7 @@ spec = do
                                     in  (done, ok && all (allowed k) j)
                             allowed k = \case
                                 Enable _ -> k == KChar 'y'
-                                Download _ -> k == KEnter
+                                Download _ _ -> k == KEnter
                                 _ -> True
                         in  snd $ foldl' step (s0, True) ks
   where
@@ -303,6 +303,6 @@ spec = do
         Enable p -> Just $ profileIccid p
         _ -> Nothing
     jobTarget = \case
-        Download DownloadTarget{..} ->
+        Download DownloadTarget{..} _ ->
             Just (targetSmdp, revealSecret targetMatchingId)
         _ -> Nothing

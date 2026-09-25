@@ -36,11 +36,14 @@ genCommand =
         , ProcessNotifications <$> listOf (choose (0, 1000))
         , DownloadProfile
             <$> (DownloadTarget "a.com" <$> (mkSecret <$> genNickname) <*> arbitrary)
-            <*> arbitrary
+            <*> oneof [pure Nothing, Just . mkSecret <$> genNickname]
         ]
 
 download :: Command
-download = DownloadProfile $ DownloadTarget "a.com" (mkSecret "X-1") False
+download =
+    DownloadProfile
+        (DownloadTarget "a.com" (mkSecret "X-1") False)
+        Nothing
 
 spec :: Spec
 spec = do

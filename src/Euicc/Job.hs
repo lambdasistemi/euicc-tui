@@ -57,8 +57,8 @@ data Job
       Enable Profile
     | -- | send these notifications
       SendNotifications [Int]
-    | -- | download a profile
-      Download DownloadTarget
+    | -- | download a profile, with a confirmation code when needed
+      Download DownloadTarget (Maybe Secret)
     deriving stock (Eq, Show)
 
 -- | Everything the UI shows about the card.
@@ -86,7 +86,7 @@ jobLabel = \case
     SendNotifications [_] -> "sending 1 notification"
     SendNotifications ns ->
         "sending " <> T.pack (show $ length ns) <> " notifications"
-    Download DownloadTarget{targetSmdp} ->
+    Download DownloadTarget{targetSmdp} _ ->
         "downloading from " <> targetSmdp
 
 {- | Run one command, turning any exception into output so that a
