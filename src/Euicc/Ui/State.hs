@@ -21,6 +21,7 @@ module Euicc.Ui.State
       -- * Queries
     , selectedProfile
     , selectedNotification
+    , typing
     , codeDisplay
     , smdpDisplay
     ) where
@@ -176,6 +177,8 @@ data State = State
     -- ^ a guided install in progress
     , stBrowser :: Maybe Browser
     -- ^ a directory listing being picked from
+    , stHelp :: Bool
+    -- ^ the key overlay is shown
     , stBusy :: Maybe Job
     -- ^ the job in flight
     , stStatus :: Maybe Status
@@ -204,6 +207,7 @@ start =
         , stDelete = Nothing
         , stWizard = Nothing
         , stBrowser = Nothing
+        , stHelp = False
         , stBusy = Just Refresh
         , stStatus = Nothing
         }
@@ -214,6 +218,8 @@ start =
 handleKey :: Key -> [Modifier] -> State -> Step
 handleKey key mods s
     | key == KChar 'c' && MCtrl `elem` mods = Halt
+    | stHelp s = continue s{stHelp = False}
+    | key == KChar '?' && not (typing s) = continue s{stHelp = True}
     | Just b <- stBrowser s = browsing b
     | Just (p, t) <- stDelete s = deleting p t
     | Just (p, t) <- stNicknameEdit s = nicknaming p t
@@ -688,3 +694,19 @@ its ICCID.
 -}
 deleteCheck :: Profile -> Text
 deleteCheck = T.takeEnd 4 . profileIccid
+
+{- | Whether keys go into a text field, where @?@ is a character and
+not the help key.
+-}
+typing :: State -> Bool
+typing s = case (stNicknameEdit s, stDelete s) of
+    (Just _, _) -> True
+    (_, Just _) -> True
+    _
+        | Just _ <- stBrowser s -> False
+        | otherwise -> case stView s of
+            DownloadView -> True
+            WizardView -> case wzPhase <$> stWizard s of
+                Just WzReady -> False
+                _ -> True
+            _ -> False

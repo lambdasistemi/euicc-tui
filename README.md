@@ -47,6 +47,8 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
 ## Keys
 
+Press `?` for the keys of the current screen (outside text fields).
+
 | View | Keys |
 |---|---|
 | Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `D` delete, `r` refresh, `q` quit |

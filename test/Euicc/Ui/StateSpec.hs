@@ -165,7 +165,7 @@ genKey :: Gen Key
 genKey =
     elements $
         [KEnter, KEsc, KUp, KDown, KBS, KChar '\t']
-            <> map KChar "abcdeijkmnpqrsxygzDLPA:01$.-"
+            <> map KChar "abcdeijkmnpqrsxygzDLPA:01$.-?"
 
 spec :: Spec
 spec = do
@@ -254,6 +254,24 @@ spec = do
             s0 <- loaded
             let (_, js) = pressAll [KDown, KChar 'D', KChar 'y', KEnter] s0
             js `shouldBe` []
+    describe "help" $ do
+        it "opens on ? over the profiles" $ do
+            s0 <- loaded
+            let (s1, js) = pressAll [KChar '?'] s0
+            js `shouldBe` []
+            stHelp s1 `shouldBe` True
+        it "closes on the next key, which does nothing else" $ do
+            s0 <- loaded
+            case handleKey (KChar 'q') [] (fst $ pressAll [KChar '?'] s0) of
+                Continue s2 j -> do
+                    j `shouldBe` Nothing
+                    stHelp s2 `shouldBe` False
+                Halt -> error "q closed the program under the help"
+        it "types ? into a text field instead" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KChar 'd', KChar '?'] s0
+            stHelp s1 `shouldBe` False
+            formSmdp (stForm s1) `shouldBe` "?"
     describe "busy" $ do
         it "starts no job while one is running" $ do
             s0 <- loaded
