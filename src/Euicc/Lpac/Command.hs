@@ -36,9 +36,10 @@ data Command
       accepted
       -}
       ProcessNotifications [Int]
-    | DownloadProfile DownloadTarget (Maybe Secret)
-    -- ^ download a profile, with the confirmation code the activation
-    -- code asked for, when it did
+    | {- | download a profile, with the confirmation code the activation
+      code asked for, when it did
+      -}
+      DownloadProfile DownloadTarget (Maybe Secret)
     deriving stock (Eq, Show)
 
 -- | The argument vector passed to @lpac@.
@@ -61,9 +62,9 @@ commandArgs = \case
         , T.unpack $ revealSecret targetMatchingId
         ]
             <> confirmArg confirmation
-    where
-        confirmArg (Just code) = ["-c", T.unpack $ revealSecret code]
-        confirmArg Nothing = []
+  where
+    confirmArg (Just code) = ["-c", T.unpack $ revealSecret code]
+    confirmArg Nothing = []
 
 {- | The environment for @lpac@: the given one with @LPAC_APDU@ forced
 to @pcsc@.

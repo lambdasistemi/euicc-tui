@@ -47,8 +47,9 @@ data DownloadTarget = DownloadTarget
     , targetMatchingId :: Secret
     -- ^ matching ID (the activation code proper)
     , targetConfirmationRequired :: Bool
-    -- ^ the activation code asks for a confirmation code
-    -- (SGP.22 flag @1@), which the operator must type in
+    {- ^ the activation code asks for a confirmation code
+    (SGP.22 flag @1@), which the operator must type in
+    -}
     }
     deriving stock (Eq, Show)
 

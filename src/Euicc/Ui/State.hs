@@ -36,6 +36,7 @@ module Euicc.Ui.State
 --
 -- While a job runs the state is busy and no further job is started.
 -- There is no key that deletes or disables a profile.
+import Control.Applicative ((<|>))
 
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
@@ -131,8 +132,9 @@ data WizardPhase
 data Wizard = Wizard
     { wzPhase :: WizardPhase
     , wzKnownIccids :: [Text]
-    -- ^ the profiles that existed before the download; the new plan
-    -- is the one that appears besides them
+    {- ^ the profiles that existed before the download; the new plan
+    is the one that appears besides them
+    -}
     , wzNew :: Maybe Profile
     -- ^ the plan the wizard just downloaded
     , wzNicknameInput :: Text
@@ -290,19 +292,17 @@ handleKey key mods s
             _ -> continue s
         WzConfirm -> case key of
             KEsc -> closeWizard s
-            KBS -> continue s{stWizard = fmap editConfirm $ stWizard s}
+            KBS -> continue s{stWizard = editConfirm <$> stWizard s}
             KChar c ->
-                continue s{stWizard = fmap (`snocConfirm` c) $ stWizard s}
+                continue s{stWizard = (`snocConfirm` c) <$> stWizard s}
             KEnter
                 | T.null (T.strip $ wzConfirmInput $ wizardOf s) ->
                     continue
                         s{stStatus = Just $ Info "Type the confirmation code."}
                 | otherwise ->
-                    case
-                        resolveDownloadInput
-                            (formSmdp $ stForm s)
-                            (formCode $ stForm s)
-                        of
+                    case resolveDownloadInput
+                        (formSmdp $ stForm s)
+                        (formCode $ stForm s) of
                         Left err -> continue s{stStatus = Just $ Failure err}
                         Right target ->
                             launch
@@ -316,9 +316,8 @@ handleKey key mods s
                                 s
                                     { stForm = emptyForm
                                     , stWizard =
-                                        fmap
-                                            (\w -> w{wzConfirmInput = ""})
-                                            $ stWizard s
+                                        (\w -> w{wzConfirmInput = ""})
+                                            <$> stWizard s
                                     }
             _ -> continue s
         WzNickname -> case key of
@@ -331,15 +330,14 @@ handleKey key mods s
                             (Nickname p (T.strip $ wzNicknameInput $ wizardOf s))
                             s
                                 { stWizard =
-                                    fmap
-                                        (\w -> w{wzNicknameInput = ""})
-                                        $ stWizard s
+                                    (\w -> w{wzNicknameInput = ""})
+                                        <$> stWizard s
                                 }
             KEsc -> toEnableAsk
             KBS ->
-                continue s{stWizard = fmap editNicknameInput $ stWizard s}
+                continue s{stWizard = editNicknameInput <$> stWizard s}
             KChar c ->
-                continue s{stWizard = fmap (`snocNickname` c) $ stWizard s}
+                continue s{stWizard = (`snocNickname` c) <$> stWizard s}
             _ -> continue s
         WzDone -> case key of
             KEsc -> closeWizard s
@@ -381,7 +379,7 @@ handleKey key mods s
                 , stForm = emptyForm
                 , stWizard = Nothing
                 }
-                Nothing
+            Nothing
     wizardOf st = case stWizard st of
         Just w -> w
         Nothing -> Wizard WzSource [] Nothing "" ""
@@ -400,7 +398,7 @@ handleKey key mods s
                                 { stWizard = Just w{wzPhase = WzConfirm}
                                 , stStatus =
                                     Just $
-                                        Info $
+                                        Info
                                             "This code asks for a \
                                             \confirmation code."
                                 }
@@ -409,7 +407,7 @@ handleKey key mods s
                             s
                                 { stStatus =
                                     Just $
-                                        Failure $
+                                        Failure
                                             "This code asks for a \
                                             \confirmation code; use the \
                                             \guided install (g)."
@@ -478,8 +476,9 @@ profilesOf = maybe [] snapProfiles . snapshotOf
 notificationsOf :: State -> [Notification]
 notificationsOf = maybe [] snapNotifications . snapshotOf
 
--- | Record a finished job, starting the next job of a guided
--- install when there is one.
+{- | Record a finished job, starting the next job of a guided
+install when there is one.
+-}
 finishJob :: JobResult -> State -> (State, Maybe Job)
 finishJob JobResult{..} s =
     let filled = case resultQr of
@@ -488,7 +487,7 @@ finishJob JobResult{..} s =
         s1 =
             filled
                 { stBusy = Nothing
-                , stCard = maybe (stCard filled) Just resultSnapshot
+                , stCard = resultSnapshot <|> stCard filled
                 , stStatus = case (resultOutcome, resultSnapshot) of
                     (Left f, Just (Left g)) | f == g -> Nothing
                     (Left f, _) -> Just $ Failure $ describeFailure f
@@ -504,8 +503,9 @@ finishJob JobResult{..} s =
                 }
     in  advanceWizard resultJob resultOutcome resultSnapshot s2
 
--- | Move a guided install forward after one of its jobs finished.
--- A failure closes it; success advances by the step that ran.
+{- | Move a guided install forward after one of its jobs finished.
+A failure closes it; success advances by the step that ran.
+-}
 advanceWizard
     :: Job
     -> Either LpacFailure Text

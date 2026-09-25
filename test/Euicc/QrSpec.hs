@@ -9,8 +9,9 @@ import Euicc.Lpac.Output (LpacFailure (..), describeFailure)
 import Euicc.Qr (decodeQrFile)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 
--- | The synthetic QR images recorded in test/fixtures, generated
--- with qrencode. None of them carries a real activation code.
+{- | The synthetic QR images recorded in test/fixtures, generated
+with qrencode. None of them carries a real activation code.
+-}
 image :: FilePath -> FilePath
 image name = "test/fixtures/" <> name
 

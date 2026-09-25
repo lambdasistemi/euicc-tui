@@ -8,11 +8,21 @@ so profiles can be inspected and switched without remembering ICCIDs.
   card's EID and free memory in the header.
 - **Enable** the selected profile after a y/n confirmation. The
   previously enabled profile is disabled by the card.
+- **Nickname** the selected profile, so several plans from the same
+  provider stay distinguishable in the list.
 - **Notifications**: list the pending ones and send the selected one
   or all of them.
 - **Download** a profile from an SM-DP+ address and activation code.
   A full `LPA:1$<smdp>$<code>` string can be pasted into either
-  field. The code is masked on screen.
+  field, or read from a **QR image file** (a screenshot or the image
+  saved from the purchase email) in the first field. The code is
+  masked on screen.
+- **Guided install** (`g`): read the purchase QR, download, name the
+  plan, enable it after a y/n, send the pending notifications, and
+  end on the instruction to move the card to the phone and turn data
+  roaming on. Activation codes that ask for a confirmation code
+  (GSMA `LPA:1$...$...$1`) are handled here: the code is asked for,
+  masked, and passed to `lpac -c`.
 - **Refresh** the card state at any time.
 
 There is **no delete action**. Profiles can only be removed with
@@ -26,9 +36,9 @@ With Nix (flakes enabled) on a machine where `pcscd` is running:
 nix run github:lambdasistemi/euicc-tui
 ```
 
-The package wraps `lpac` into the program's `PATH`, and every `lpac`
-call runs with `LPAC_APDU=pcsc`, whatever the caller's environment
-says.
+The package wraps `lpac` and `zbar` (QR decoding) into the program's
+`PATH`, and every `lpac` call runs with `LPAC_APDU=pcsc`, whatever
+the caller's environment says.
 
 On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
@@ -36,10 +46,12 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
 | View | Keys |
 |---|---|
-| Profiles | up/down (or j/k) select, `e`/enter enable, `n` notifications, `d` download, `r` refresh, `q` quit |
+| Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `r` refresh, `q` quit |
 | Confirmation | `y` enable, `n`/esc cancel |
+| Nickname | type, enter set, esc cancel |
 | Notifications | up/down select, `s` send selected, `a` send all, `p`/esc back, `r` refresh, `q` quit |
-| Download | tab switch field, enter download, esc cancel (clears the code) |
+| Download | tab switch field, enter on the QR path reads the image, enter on the code downloads, esc cancel (clears the code) |
+| Guided install | as download, then: confirmation code enter submits, nickname enter accepts (empty skips), y/n enable, esc on the closing screen returns |
 
 While an `lpac` call runs, the status line says so and new actions are
 refused; the screen keeps responding.
@@ -60,9 +72,10 @@ refused; the screen keeps responding.
   (`lpac notification process -r`).
 - **The activation code stays out of sight.** It is masked in the
   form, cleared after submission or cancel, and removed from any error
-  text before it is shown. It is passed to `lpac` as a command-line
-  argument, so it is visible in the process table for the duration of
-  the download.
+  text before it is shown. The confirmation code of a guided install
+  gets the same treatment. Both are passed to `lpac` as command-line
+  arguments, so they are visible in the process table for the
+  duration of the download.
 
 ## Error messages
 
@@ -86,6 +99,7 @@ just run         # start the TUI from the working tree
 ```
 
 The pure parts (lpac output decoding, failure classification,
-activation codes, the UI state machine) are unit-tested against
-recorded `lpac` output in `test/fixtures`. Only the process runner and
-the terminal drawing are untested.
+activation codes, QR decoding, the UI state machine) are unit-tested
+against recorded `lpac` output and synthetic QR images (built with
+`qrencode`, never real codes) in `test/fixtures`. Only the process
+runner and the terminal drawing are untested.

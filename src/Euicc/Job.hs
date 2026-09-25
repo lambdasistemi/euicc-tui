@@ -83,8 +83,9 @@ data JobResult = JobResult
     , resultOutcome :: Either LpacFailure Text
     -- ^ what happened to the requested action
     , resultSnapshot :: Maybe (Either LpacFailure Snapshot)
-    -- ^ the card as read afterwards; 'Nothing' when the job did not
-    -- touch the card
+    {- ^ the card as read afterwards; 'Nothing' when the job did not
+    touch the card
+    -}
     , resultQr :: Maybe DownloadTarget
     -- ^ the activation code a 'DecodeQr' job read, if any
     }
@@ -151,7 +152,7 @@ runJob runner job = case job of
         pure
             JobResult
                 { resultJob = job
-                , resultOutcome = (const "QR code read.") <$> decoded
+                , resultOutcome = "QR code read." <$ decoded
                 , resultSnapshot = Nothing
                 , resultQr = either (const Nothing) Just decoded
                 }
@@ -163,7 +164,9 @@ runJob runner job = case job of
                 { resultJob = job
                 , resultOutcome = case job of
                     Refresh ->
-                        maybe (Right "Card read.") (fmap $ const "Card read.")
+                        maybe
+                            (Right "Card read.")
+                            (fmap $ const "Card read.")
                             snapshot
                     _ -> outcome
                 , resultSnapshot = snapshot
@@ -179,8 +182,8 @@ runJob runner job = case job of
                 $ EnableProfile
                 $ profileIccid p
         Nickname p nickname ->
-            done ("Named " <> profileLabel p <> ".")
-                $ NicknameProfile (profileIccid p) nickname
+            done ("Named " <> profileLabel p <> ".") $
+                NicknameProfile (profileIccid p) nickname
         SendNotifications seqs ->
             done "Notifications sent." $ ProcessNotifications seqs
         Download target@DownloadTarget{targetMatchingId} confirmation ->

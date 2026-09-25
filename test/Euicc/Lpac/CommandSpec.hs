@@ -35,7 +35,7 @@ genCommand =
         , pure ListNotifications
         , ProcessNotifications <$> listOf (choose (0, 1000))
         , DownloadProfile
-            <$> (DownloadTarget "a.com" <$> (mkSecret <$> genNickname) <*> arbitrary)
+            <$> (DownloadTarget "a.com" . mkSecret <$> genNickname <*> arbitrary)
             <*> oneof [pure Nothing, Just . mkSecret <$> genNickname]
         ]
 

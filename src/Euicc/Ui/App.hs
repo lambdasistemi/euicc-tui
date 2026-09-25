@@ -29,7 +29,6 @@ import Brick
     , hBox
     , hLimit
     , halt
-
     , neverShowCursor
     , on
     , padBottom
@@ -267,51 +266,57 @@ notificationsTable s = \case
 
 wizardBody :: State -> Widget ()
 wizardBody s = case wzPhase w of
-    WzSource -> vBox
-        [ txt "New plan — where does it come from?"
-        , txt " "
-        , field SmdpField "SM-DP+ address " $ smdpDisplay form
-        , field CodeField "Activation code" $ codeDisplay form
-        , txt " "
-        , txt "The activation code is never shown."
-        ]
-    WzConfirm -> vBox
-        [ txt "This activation code asks for a confirmation code."
-        , txt "The provider sent it separately; it is never shown."
-        , txt " "
-        , hBox
-            [ txt "Confirmation code  "
-            , highlight True
-                $ hLimit 50
-                $ padRight Max
-                $ txt $ confirmDisplay w
+    WzSource ->
+        vBox
+            [ txt "New plan — where does it come from?"
+            , txt " "
+            , field SmdpField "SM-DP+ address " $ smdpDisplay form
+            , field CodeField "Activation code" $ codeDisplay form
+            , txt " "
+            , txt "The activation code is never shown."
             ]
-        , txt " "
-        , txt "enter confirms, esc cancels the install"
-        ]
-    WzNickname -> vBox
-        [ txt "Give the plan a nickname (optional)."
-        , txt "The list shows nicknames, so plans from the same"
-        , txt "provider stay distinguishable."
-        , txt " "
-        , hBox
-            [ txt "Nickname  "
-            , highlight True
-                $ hLimit 50
-                $ padRight Max
-                $ txt $ wzNicknameInput w
+    WzConfirm ->
+        vBox
+            [ txt "This activation code asks for a confirmation code."
+            , txt "The provider sent it separately; it is never shown."
+            , txt " "
+            , hBox
+                [ txt "Confirmation code  "
+                , highlight True
+                    $ hLimit 50
+                    $ padRight Max
+                    $ txt
+                    $ confirmDisplay w
+                ]
+            , txt " "
+            , txt "enter confirms, esc cancels the install"
             ]
-        , txt " "
-        , txt "enter accepts (empty skips), esc skips"
-        ]
-    WzDone -> vBox
-        [ txt "The plan is installed and enabled."
-        , txt " "
-        , txt "Move the card to the phone and turn data roaming"
-        , txt "ON for this SIM."
-        , txt " "
-        , txt "esc returns to the profile list."
-        ]
+    WzNickname ->
+        vBox
+            [ txt "Give the plan a nickname (optional)."
+            , txt "The list shows nicknames, so plans from the same"
+            , txt "provider stay distinguishable."
+            , txt " "
+            , hBox
+                [ txt "Nickname  "
+                , highlight True
+                    $ hLimit 50
+                    $ padRight Max
+                    $ txt
+                    $ wzNicknameInput w
+                ]
+            , txt " "
+            , txt "enter accepts (empty skips), esc skips"
+            ]
+    WzDone ->
+        vBox
+            [ txt "The plan is installed and enabled."
+            , txt " "
+            , txt "Move the card to the phone and turn data roaming"
+            , txt "ON for this SIM."
+            , txt " "
+            , txt "esc returns to the profile list."
+            ]
   where
     w = fromMaybe (Wizard WzSource [] Nothing "" "") $ stWizard s
     form = stForm s
@@ -378,7 +383,7 @@ helpLine s = padLeftRight 1 $ str $ case stView s of
 
 confirmLayer :: State -> Widget ()
 confirmLayer s = case stConfirm s of
-    Nothing -> emptyWidget
+    Nothing -> nicknameLayer s
     Just p ->
         centerLayer
             $ borderWithLabel (txt " Enable profile ")
@@ -390,5 +395,27 @@ confirmLayer s = case stConfirm s of
                 , txt " "
                 , txt "The currently enabled profile will be disabled."
                 , hCenter $ txt "Enable it? (y/n)"
+                , txt " "
+                ]
+
+nicknameLayer :: State -> Widget ()
+nicknameLayer s = case stNicknameEdit s of
+    Nothing -> emptyWidget
+    Just (p, t) ->
+        centerLayer
+            $ borderWithLabel (txt " Nickname ")
+            $ padLeftRight 2
+            $ vBox
+                [ txt " "
+                , hCenter $ txt $ profileLabel p
+                , hCenter $ txt $ profileIccid p
+                , txt " "
+                , hCenter
+                    $ hLimit 40
+                    $ padRight Max
+                    $ txt
+                    $ if T.null t then " " else t
+                , txt " "
+                , hCenter $ txt "enter sets, esc cancels, empty clears the field"
                 , txt " "
                 ]

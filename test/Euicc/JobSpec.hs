@@ -1,6 +1,7 @@
 module Euicc.JobSpec (spec) where
 
 import Data.IORef (modifyIORef, newIORef, readIORef)
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Euicc.ActivationCode (DownloadTarget (..), mkSecret)
 import Euicc.Job
@@ -15,10 +16,10 @@ import Euicc.Lpac.Output
     ( ChipInfo (..)
     , LpacFailure (..)
     , Profile (..)
-    , profileLabel
     , RawOutput
     , describeFailure
     , parseProfiles
+    , profileLabel
     )
 import Fixtures (fixture, fixtureOk)
 import System.Exit (ExitCode (..))
@@ -56,7 +57,7 @@ disabledProfile = do
 
 -- | The card state of a result, for assertions.
 snapOf :: JobResult -> Either LpacFailure Snapshot
-snapOf = maybe (Left (UnexpectedOutput "no card read")) id . resultSnapshot
+snapOf = fromMaybe (Left (UnexpectedOutput "no card read")) . resultSnapshot
 
 reads' :: [Command]
 reads' = [ReadChipInfo, ListProfiles, ListNotifications]

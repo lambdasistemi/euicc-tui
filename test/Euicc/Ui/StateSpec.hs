@@ -72,7 +72,8 @@ loaded :: IO State
 loaded = do
     snap <- loadedSnapshot
     let (s, _) = start
-    pure $ apply (jobResult Refresh (Right "loaded") (Just (Right snap))) s
+    pure $
+        apply (jobResult Refresh (Right "loaded") (Just (Right snap))) s
 
 -- | Apply a finished job to a state.
 apply :: JobResult -> State -> State
@@ -236,7 +237,8 @@ spec = do
             snap <- loadedSnapshot
             let s1 =
                     apply
-                        ( jobResult Refresh
+                        ( jobResult
+                            Refresh
                             (Left $ LpacError "es9p_handle_notification" "")
                             (Just (Right snap))
                         )
@@ -263,7 +265,8 @@ spec = do
             let (s1, _) = press KDown s0
                 s2 =
                     apply
-                        ( jobResult Refresh
+                        ( jobResult
+                            Refresh
                             (Right "ok")
                             (Just (Right snap{snapProfiles = take 1 $ snapProfiles snap}))
                         )
@@ -284,7 +287,11 @@ spec = do
             snap <- loadedSnapshot
             let s1 =
                     apply
-                        (jobResult Refresh (Right "ok") (Just (Right snap{snapNotifications = []})))
+                        ( jobResult
+                            Refresh
+                            (Right "ok")
+                            (Just (Right snap{snapNotifications = []}))
+                        )
                         s0
             snd (pressAll [KChar 'n', KChar 'a', KChar 's'] s1)
                 `shouldBe` []
@@ -462,7 +469,10 @@ spec = do
                 [Enable p] -> profileIccid p == "8900000000000000099"
                 _ -> False
             snap <- loadedSnapshot
-            let (s7, chained) = finishJob (jobResult (Enable dummyProfile) (Right "Enabled.") (Just (Right snap))) s6
+            let (s7, chained) =
+                    finishJob
+                        (jobResult (Enable dummyProfile) (Right "Enabled.") (Just (Right snap)))
+                        s6
             chained `shouldBe` Just (SendNotifications [7, 8])
             fmap wzPhase (stWizard s7) `shouldSatisfy` (/= Just WzDone)
             let (s8, chained') =
@@ -545,7 +555,8 @@ spec = do
             s0 <- loaded
             let (s1, _) = pressAll [KDown, KChar 'm'] s0
                 (s2, _) = pressAll (typeText "ab" <> [KBS]) s1
-            stNicknameEdit s2 `shouldBe` fmap (\p -> (p, "a")) (selectedProfile s2)
+            stNicknameEdit s2
+                `shouldBe` fmap (,"a") (selectedProfile s2)
         it "cancels on Esc" $ do
             s0 <- loaded
             let (s1, js) = pressAll [KDown, KChar 'm', KEsc] s0

@@ -29,10 +29,11 @@ import System.Process.Typed
     , setStdin
     )
 
--- | Decode the QR code in an image file and parse it as an
--- activation code. Fails when @zbarimg@ is missing, when the image
--- holds no QR code, or when the decoded text is not an @LPA:1$...@
--- code.
+{- | Decode the QR code in an image file and parse it as an
+activation code. Fails when @zbarimg@ is missing, when the image
+holds no QR code, or when the decoded text is not an @LPA:1$...@
+code.
+-}
 decodeQrFile :: FilePath -> IO (Either LpacFailure DownloadTarget)
 decodeQrFile path = do
     r <- try $ readProcess config
