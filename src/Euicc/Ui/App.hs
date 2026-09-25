@@ -271,9 +271,12 @@ wizardBody s = case wzPhase w of
         vBox
             [ txt "New plan — where does it come from?"
             , txt " "
+            , field QrField "QR image       " $ qrDisplay form
             , field SmdpField "SM-DP+ address " $ smdpDisplay form
             , field CodeField "Activation code" $ codeDisplay form
             , txt " "
+            , txt "Enter on an empty QR field browses for the image,"
+            , txt "or tab to the other fields and type the code."
             , txt "The activation code is never shown."
             ]
     WzConfirm ->
@@ -353,6 +356,12 @@ downloadForm form =
                 $ padRight Max
                 $ txt value
             ]
+
+-- | What the QR field shows: the picked path, or how to pick one.
+qrDisplay :: Form -> Text
+qrDisplay Form{formQr}
+    | T.null formQr = "(enter to browse)"
+    | otherwise = formQr
 
 highlight :: Bool -> Widget () -> Widget ()
 highlight True = withAttr selectedAttr
