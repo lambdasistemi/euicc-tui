@@ -266,9 +266,9 @@ finishJob JobResult{..} s =
     let s' =
             s
                 { stBusy = Nothing
-                , stCard = Just resultSnapshot
+                , stCard = maybe (stCard s) Just resultSnapshot
                 , stStatus = case (resultOutcome, resultSnapshot) of
-                    (Left f, Left g) | f == g -> Nothing
+                    (Left f, Just (Left g)) | f == g -> Nothing
                     (Left f, _) -> Just $ Failure $ describeFailure f
                     (Right msg, _) -> Just $ Info msg
                 }

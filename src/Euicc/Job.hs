@@ -7,6 +7,7 @@ module Euicc.Job
     , jobLabel
     , Snapshot (..)
     , JobResult (..)
+    , jobResult
     , runJob
     , loadSnapshot
     ) where
@@ -17,11 +18,12 @@ module Euicc.Job
 -- Copyright   : (c) Paolo Veronelli, 2026
 -- License     : Apache-2.0
 --
--- A 'Job' is one user request. 'runJob' performs it through an
--- 'LpacRunner' and then reloads the card state, so the UI always shows
--- what the card says after the action, whether the action succeeded or
--- not. The runner is the only point of contact with the hardware, so
--- tests replace it with recorded outputs.
+-- A 'Job' is one user request. Jobs that touch the card run through
+-- an 'LpacRunner' and then reload the card state, so the UI always
+-- shows what the card says after the action, whether the action
+-- succeeded or not. 'DecodeQr' reads a QR image instead and leaves
+-- the card state alone. The runner is the only point of contact with
+-- the hardware, so tests replace it with recorded outputs.
 
 import Control.Exception (SomeException, displayException, try)
 import Data.Bifunctor (first)
@@ -42,6 +44,7 @@ import Euicc.Lpac.Output
     , parseProfiles
     , profileLabel
     )
+import Euicc.Qr (decodeQrFile)
 import System.Exit (ExitCode (..))
 
 -- | How to run one @lpac@ command.
@@ -55,10 +58,14 @@ data Job
       Refresh
     | -- | enable the given profile
       Enable Profile
+    | -- | give the given profile a nickname
+      Nickname Profile Text
     | -- | send these notifications
       SendNotifications [Int]
     | -- | download a profile, with a confirmation code when needed
       Download DownloadTarget (Maybe Secret)
+    | -- | read an activation code from a QR image file
+      DecodeQr FilePath
     deriving stock (Eq, Show)
 
 -- | Everything the UI shows about the card.
@@ -71,23 +78,46 @@ data Snapshot = Snapshot
 
 -- | The outcome of a job and the card state read after it.
 data JobResult = JobResult
-    { resultOutcome :: Either LpacFailure Text
+    { resultJob :: Job
+    -- ^ the job this result belongs to
+    , resultOutcome :: Either LpacFailure Text
     -- ^ what happened to the requested action
-    , resultSnapshot :: Either LpacFailure Snapshot
-    -- ^ the card as read afterwards
+    , resultSnapshot :: Maybe (Either LpacFailure Snapshot)
+    -- ^ the card as read afterwards; 'Nothing' when the job did not
+    -- touch the card
+    , resultQr :: Maybe DownloadTarget
+    -- ^ the activation code a 'DecodeQr' job read, if any
     }
     deriving stock (Eq, Show)
+
+{- | A result with no QR payload, for tests and callers that only
+need the outcome and the card state.
+-}
+jobResult
+    :: Job
+    -> Either LpacFailure Text
+    -> Maybe (Either LpacFailure Snapshot)
+    -> JobResult
+jobResult job outcome snapshot =
+    JobResult
+        { resultJob = job
+        , resultOutcome = outcome
+        , resultSnapshot = snapshot
+        , resultQr = Nothing
+        }
 
 -- | A short description of a running job, for the busy indicator.
 jobLabel :: Job -> Text
 jobLabel = \case
     Refresh -> "reading the card"
     Enable p -> "enabling " <> profileLabel p
+    Nickname p _ -> "naming " <> profileLabel p
     SendNotifications [_] -> "sending 1 notification"
     SendNotifications ns ->
         "sending " <> T.pack (show $ length ns) <> " notifications"
     Download DownloadTarget{targetSmdp} _ ->
         "downloading from " <> targetSmdp
+    DecodeQr _ -> "reading the QR image"
 
 {- | Run one command, turning any exception into output so that a
 failure is always reported, never thrown.
@@ -115,16 +145,30 @@ loadSnapshot runner = do
 
 -- | Perform a job, then reload the card state.
 runJob :: LpacRunner -> Job -> IO JobResult
-runJob runner job = do
-    outcome <- act
-    snapshot <- loadSnapshot runner
-    pure
-        JobResult
-            { resultOutcome = case job of
-                Refresh -> "Card read." <$ snapshot
-                _ -> outcome
-            , resultSnapshot = snapshot
-            }
+runJob runner job = case job of
+    DecodeQr path -> do
+        decoded <- decodeQrFile path
+        pure
+            JobResult
+                { resultJob = job
+                , resultOutcome = (const "QR code read.") <$> decoded
+                , resultSnapshot = Nothing
+                , resultQr = either (const Nothing) Just decoded
+                }
+    _ -> do
+        outcome <- act
+        snapshot <- Just <$> loadSnapshot runner
+        pure
+            JobResult
+                { resultJob = job
+                , resultOutcome = case job of
+                    Refresh ->
+                        maybe (Right "Card read.") (fmap $ const "Card read.")
+                            snapshot
+                    _ -> outcome
+                , resultSnapshot = snapshot
+                , resultQr = Nothing
+                }
   where
     done message command =
         (message <$) . parseDone <$> runSafely runner command
@@ -134,6 +178,9 @@ runJob runner job = do
             done ("Enabled " <> profileLabel p <> ".")
                 $ EnableProfile
                 $ profileIccid p
+        Nickname p nickname ->
+            done ("Named " <> profileLabel p <> ".")
+                $ NicknameProfile (profileIccid p) nickname
         SendNotifications seqs ->
             done "Notifications sent." $ ProcessNotifications seqs
         Download target@DownloadTarget{targetMatchingId} confirmation ->
@@ -141,6 +188,7 @@ runJob runner job = do
                 <$> done
                     "Profile downloaded."
                     (DownloadProfile target confirmation)
+        DecodeQr _ -> pure $ Right ""
 
 -- | Remove a secret from every text a failure carries.
 redactFailure :: Secret -> LpacFailure -> LpacFailure

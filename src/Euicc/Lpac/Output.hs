@@ -116,6 +116,8 @@ data LpacFailure
       UsbAccessDenied
     | -- | lpac used a modem backend instead of PC/SC
       WrongApduBackend
+    | -- | a QR image could not be decoded into an activation code
+      QrDecode Text
     | -- | lpac reported an error: failing function and detail
       LpacError Text Text
     | -- | output that could not be understood, with context
@@ -150,6 +152,7 @@ describeFailure = \case
     WrongApduBackend ->
         "lpac tried a modem backend instead of the smart-card \
         \reader. It must run with LPAC_APDU=pcsc."
+    QrDecode msg -> "The QR image could not be used: " <> msg
     LpacError function detail
         | T.null (T.strip detail) -> "lpac failed in " <> function <> "."
         | otherwise -> "lpac failed in " <> function <> ": " <> detail

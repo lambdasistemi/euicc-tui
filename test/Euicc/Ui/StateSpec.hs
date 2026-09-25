@@ -3,7 +3,7 @@ module Euicc.Ui.StateSpec (spec) where
 import Data.Text (Text)
 import Data.Text qualified as T
 import Euicc.ActivationCode (DownloadTarget (..), revealSecret)
-import Euicc.Job (Job (..), JobResult (..), Snapshot (..))
+import Euicc.Job (Job (..), Snapshot (..), jobResult)
 import Euicc.Lpac.Output
     ( ChipInfo (..)
     , LpacFailure (..)
@@ -60,7 +60,7 @@ loaded :: IO State
 loaded = do
     snap <- loadedSnapshot
     let (s, _) = start
-    pure $ finishJob (JobResult (Right "loaded") (Right snap)) s
+    pure $ finishJob (jobResult Refresh (Right "loaded") (Just (Right snap))) s
 
 -- | Press one key, expecting the program to continue.
 press :: Key -> State -> (State, Maybe Job)
@@ -137,7 +137,7 @@ spec = do
             s0 <- loaded
             snap <- loadedSnapshot
             let (s1, _) = press (KChar 'r') s0
-                s2 = finishJob (JobResult (Right "ok") (Right snap)) s1
+                s2 = finishJob (jobResult Refresh (Right "ok") (Just (Right snap))) s1
             stBusy s2 `shouldBe` Nothing
     describe "results" $ do
         it "shows a failed action as a failure message" $ do
@@ -145,9 +145,9 @@ spec = do
             snap <- loadedSnapshot
             let s1 =
                     finishJob
-                        ( JobResult
+                        ( jobResult Refresh
                             (Left $ LpacError "es9p_handle_notification" "")
-                            (Right snap)
+                            (Just (Right snap))
                         )
                         s0
             stStatus s1 `shouldSatisfy` \case
@@ -155,16 +155,16 @@ spec = do
                 _ -> False
         it "stays on the profiles view while the card is unreadable" $ do
             let (s, _) = start
-                s1 = finishJob (JobResult (Left NoReader) (Left NoReader)) s
+                s1 = finishJob (jobResult Refresh (Left NoReader) (Just (Left NoReader))) s
             stView (fst $ pressAll [KChar 'd'] s1) `shouldBe` ProfilesView
             stView (fst $ pressAll [KChar 'n'] s1) `shouldBe` ProfilesView
         it "does not repeat the card failure on the status line" $ do
             let (s, _) = start
-                s1 = finishJob (JobResult (Left NoReader) (Left NoReader)) s
+                s1 = finishJob (jobResult Refresh (Left NoReader) (Just (Left NoReader))) s
             stStatus s1 `shouldBe` Nothing
         it "keeps a missing reader as the card state" $ do
             let (s, _) = start
-                s1 = finishJob (JobResult (Left NoReader) (Left NoReader)) s
+                s1 = finishJob (jobResult Refresh (Left NoReader) (Just (Left NoReader))) s
             stCard s1 `shouldBe` Just (Left NoReader)
         it "clamps the cursor when profiles disappear" $ do
             s0 <- loaded
@@ -172,9 +172,9 @@ spec = do
             let (s1, _) = press KDown s0
                 s2 =
                     finishJob
-                        ( JobResult
+                        ( jobResult Refresh
                             (Right "ok")
-                            (Right snap{snapProfiles = take 1 $ snapProfiles snap})
+                            (Just (Right snap{snapProfiles = take 1 $ snapProfiles snap}))
                         )
                         s1
             fmap profileIccid (selectedProfile s2)
@@ -193,7 +193,7 @@ spec = do
             snap <- loadedSnapshot
             let s1 =
                     finishJob
-                        (JobResult (Right "ok") (Right snap{snapNotifications = []}))
+                        (jobResult Refresh (Right "ok") (Just (Right snap{snapNotifications = []})))
                         s0
             snd (pressAll [KChar 'n', KChar 'a', KChar 's'] s1)
                 `shouldBe` []
@@ -288,7 +288,7 @@ spec = do
                                                 s'
                                                 ( const $
                                                     finishJob
-                                                        (JobResult (Right "ok") (Right snap))
+                                                        (jobResult Refresh (Right "ok") (Just (Right snap)))
                                                         s'
                                                 )
                                                 j

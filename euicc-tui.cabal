@@ -19,6 +19,7 @@ stability:          experimental
 build-type:         Simple
 extra-doc-files:    README.md
 extra-source-files:
+  test/fixtures/*.png
   test/fixtures/*.stderr
   test/fixtures/*.stdout
 
@@ -59,6 +60,7 @@ library
     Euicc.Lpac.Command
     Euicc.Lpac.Output
     Euicc.Lpac.Process
+    Euicc.Qr
     Euicc.Ui.App
     Euicc.Ui.State
 
@@ -91,6 +93,7 @@ test-suite unit-tests
     Euicc.JobSpec
     Euicc.Lpac.CommandSpec
     Euicc.Lpac.OutputSpec
+    Euicc.QrSpec
     Euicc.Ui.StateSpec
     Fixtures
 

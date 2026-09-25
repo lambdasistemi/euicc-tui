@@ -15,6 +15,7 @@ import Euicc.Lpac.Output
     ( ChipInfo (..)
     , LpacFailure (..)
     , Profile (..)
+    , profileLabel
     , RawOutput
     , describeFailure
     , parseProfiles
@@ -53,6 +54,10 @@ disabledProfile = do
     Right [_, p] <- parseProfiles <$> fixtureOk "profile-list"
     pure p
 
+-- | The card state of a result, for assertions.
+snapOf :: JobResult -> Either LpacFailure Snapshot
+snapOf = maybe (Left (UnexpectedOutput "no card read")) id . resultSnapshot
+
 reads' :: [Command]
 reads' = [ReadChipInfo, ListProfiles, ListNotifications]
 
@@ -62,18 +67,18 @@ spec = do
         it "reads chip info, profiles and notifications" $ do
             (r, cmds) <- runRecorded (const Nothing) Refresh
             cmds `shouldBe` reads'
-            fmap snapChip (resultSnapshot r)
+            fmap snapChip (snapOf r)
                 `shouldBe` Right
                     (ChipInfo "89049032000001000000000000000123" (Just 291740))
-            fmap (length . snapProfiles) (resultSnapshot r)
+            fmap (length . snapProfiles) (snapOf r)
                 `shouldBe` Right 2
-            fmap (length . snapNotifications) (resultSnapshot r)
+            fmap (length . snapNotifications) (snapOf r)
                 `shouldBe` Right 2
         it "reports a missing reader without crashing" $ do
             let runner = LpacRunner $ \_ ->
                     fixture (ExitFailure 255) "no-reader"
             r <- runJob runner Refresh
-            resultSnapshot r `shouldBe` Left NoReader
+            snapOf r `shouldBe` Left NoReader
     describe "Enable" $ do
         it "enables by ICCID, then reloads" $ do
             p <- disabledProfile
@@ -128,8 +133,22 @@ spec = do
                     (SendNotifications [7, 8])
             resultOutcome r
                 `shouldBe` Left (LpacError "es9p_handle_notification" "")
-            fmap (length . snapProfiles) (resultSnapshot r)
+            fmap (length . snapProfiles) (snapOf r)
                 `shouldBe` Right 2
+    describe "Nickname" $ do
+        it "nicknames by ICCID, then reloads" $ do
+            p <- disabledProfile
+            (r, cmds) <-
+                runRecorded
+                    ( \case
+                        NicknameProfile _ _ ->
+                            Just $ fixtureOk "profile-nickname-ok"
+                        _ -> Nothing
+                    )
+                    (Nickname p "holiday")
+            cmds
+                `shouldBe` NicknameProfile (profileIccid p) "holiday" : reads'
+            resultOutcome r `shouldBe` Right ("Named " <> profileLabel p <> ".")
     describe "Download" $ do
         let target =
                 DownloadTarget
@@ -147,6 +166,17 @@ spec = do
                     (Download target Nothing)
             cmds `shouldBe` DownloadProfile target Nothing : reads'
             resultOutcome r `shouldSatisfy` either (const False) (const True)
+        it "passes the confirmation code to lpac" $ do
+            (r, cmds) <-
+                runRecorded
+                    ( \case
+                        DownloadProfile _ _ -> Just $ fixtureOk "download-ok"
+                        _ -> Nothing
+                    )
+                    (Download target $ Just $ mkSecret "C-9")
+            take 1 cmds
+                `shouldBe` [DownloadProfile target (Just $ mkSecret "C-9")]
+            resultOutcome r `shouldSatisfy` either (const False) (const True)
         it "never echoes the matching ID in a failure" $ do
             (r, _) <-
                 runRecorded
@@ -160,3 +190,24 @@ spec = do
             let shown = either describeFailure id $ resultOutcome r
             shown `shouldSatisfy` (not . T.isInfixOf "SECRET-MATCHING-ID")
             shown `shouldSatisfy` T.isInfixOf "refused"
+    describe "DecodeQr" $ do
+        it "reads an image without touching the card" $ do
+            (r, cmds) <-
+                runRecorded
+                    (const Nothing)
+                    (DecodeQr "test/fixtures/qr-lpa-ok.png")
+            cmds `shouldBe` []
+            resultOutcome r `shouldBe` Right "QR code read."
+            resultSnapshot r `shouldBe` Nothing
+            fmap targetSmdp (resultQr r) `shouldBe` Just "qr-smdp.example.org"
+        it "reports an image without an activation code" $ do
+            (r, cmds) <-
+                runRecorded
+                    (const Nothing)
+                    (DecodeQr "test/fixtures/qr-not-lpa.png")
+            cmds `shouldBe` []
+            resultSnapshot r `shouldBe` Nothing
+            resultQr r `shouldBe` Nothing
+            resultOutcome r `shouldSatisfy` \case
+                Left (QrDecode _) -> True
+                _ -> False
