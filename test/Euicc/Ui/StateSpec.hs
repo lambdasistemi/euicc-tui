@@ -22,6 +22,7 @@ import Euicc.Lpac.Output
     )
 import Euicc.Ui.State
     ( Browser (..)
+    , Click (..)
     , Field (..)
     , Form (..)
     , State (..)
@@ -32,6 +33,7 @@ import Euicc.Ui.State
     , WizardPhase (..)
     , codeDisplay
     , finishJob
+    , handleClick
     , handleKey
     , selectedProfile
     , smdpDisplay
@@ -272,6 +274,59 @@ spec = do
             let (s1, _) = pressAll [KChar 'd', KChar '?'] s0
             stHelp s1 `shouldBe` True
             formSmdp (stForm s1) `shouldBe` ""
+    describe "mouse" $ do
+        let click c s = case handleClick c s of
+                Continue s' j -> (s', j)
+                Halt -> error "unexpected halt"
+        it "selects a profile row on click" $ do
+            s0 <- loaded
+            let (s1, j) = click (ClickProfile 1) s0
+            j `shouldBe` Nothing
+            stProfileCursor s1 `shouldBe` 1
+        it "asks to enable on a click over the selected row" $ do
+            s0 <- loaded
+            let (s1, j) = click (ClickProfile 1) $ fst $ click (ClickProfile 1) s0
+            j `shouldBe` Nothing
+            fmap profileIccid (stConfirm s1)
+                `shouldBe` Just "8939100000000000001"
+        it "never enables by clicks alone" $ do
+            s0 <- loaded
+            let (_, j) =
+                    click (ClickProfile 1)
+                        $ fst
+                        $ click (ClickProfile 1)
+                        $ fst
+                        $ click (ClickProfile 1) s0
+            j `shouldBe` Nothing
+        it "ignores clicks while the delete dialog is open" $ do
+            s0 <- loaded
+            let (s1, _) = pressAll [KDown, KChar 'D'] s0
+                (s2, j) = click (ClickProfile 0) s1
+            j `shouldBe` Nothing
+            s2 `shouldBe` s1
+        it "switches tabs on click" $ do
+            s0 <- loaded
+            let (s1, _) = click (ClickTab NotificationsView) s0
+                (s2, _) = click (ClickTab ProfilesView) s1
+            stView s1 `shouldBe` NotificationsView
+            stView s2 `shouldBe` ProfilesView
+        it "never sends notifications by clicks" $ do
+            s0 <- loaded
+            let (s1, _) = click (ClickTab NotificationsView) s0
+                (_, j) = click (ClickNotification 0) s1
+            j `shouldSatisfy` \case
+                Nothing -> True
+                _ -> False
+        it "moves with the wheel" $ do
+            s0 <- loaded
+            let (s1, _) = click WheelDown s0
+            stProfileCursor s1 `shouldBe` 1
+        it "picks a QR image on a click over the selected entry" $ do
+            s0 <- atListing
+            let (s1, j1) = click (ClickPicker 1) s0
+                (_, j2) = click (ClickPicker 1) s1
+            j1 `shouldBe` Nothing
+            j2 `shouldBe` Just (DecodeQr "/home/op/cuniq.png")
     describe "busy" $ do
         it "starts no job while one is running" $ do
             s0 <- loaded

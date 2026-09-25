@@ -16,6 +16,8 @@ module Euicc.Ui.State
     , Step (..)
     , start
     , handleKey
+    , Click (..)
+    , handleClick
     , finishJob
 
       -- * Queries
@@ -75,7 +77,7 @@ data View
     | NotificationsView
     | DownloadView
     | WizardView
-    deriving stock (Eq, Show)
+    deriving stock (Eq, Ord, Show)
 
 -- | The fields of the download form, in tab order.
 data Field
@@ -710,3 +712,63 @@ typing s = case (stNicknameEdit s, stDelete s) of
                 Just WzReady -> False
                 _ -> True
             _ -> False
+
+-- | A mouse action, already resolved to what was under the pointer.
+data Click
+    = -- | left click on the profile row with this index
+      ClickProfile Int
+    | -- | left click on the notification row with this index
+      ClickNotification Int
+    | -- | left click on a tab
+      ClickTab View
+    | -- | left click on the picker entry with this index
+      ClickPicker Int
+    | WheelUp
+    | WheelDown
+    deriving stock (Eq, Show)
+
+{- | React to a click. A click selects; a click on the profile or
+picker entry already selected acts like Enter, so every
+action keeps its keyboard confirmation. Notifications are sent
+only from the keyboard. Open dialogs ignore clicks.
+-}
+handleClick :: Click -> State -> Step
+handleClick click s
+    | stHelp s = Continue s{stHelp = False} Nothing
+    | Just b <- stBrowser s = case click of
+        ClickPicker i
+            | i == brCursor b -> key KEnter
+            | otherwise ->
+                Continue
+                    s{stBrowser = Just b{brCursor = clamp (length $ brItems b) i}}
+                    Nothing
+        WheelUp -> key KUp
+        WheelDown -> key KDown
+        _ -> ignore
+    | Just _ <- stDelete s = ignore
+    | Just _ <- stNicknameEdit s = ignore
+    | Just _ <- stConfirm s = ignore
+    | otherwise = case (stView s, click) of
+        (ProfilesView, ClickProfile i)
+            | i == stProfileCursor s -> key KEnter
+            | otherwise ->
+                Continue
+                    s{stProfileCursor = clamp (length $ profilesOf s) i}
+                    Nothing
+        (NotificationsView, ClickNotification i) ->
+            Continue
+                s
+                    { stNotificationCursor =
+                        clamp (length $ notificationsOf s) i
+                    }
+                Nothing
+        (ProfilesView, ClickTab NotificationsView) -> key (KChar 'n')
+        (NotificationsView, ClickTab ProfilesView) -> key (KChar 'p')
+        (ProfilesView, WheelUp) -> key KUp
+        (ProfilesView, WheelDown) -> key KDown
+        (NotificationsView, WheelUp) -> key KUp
+        (NotificationsView, WheelDown) -> key KDown
+        _ -> ignore
+  where
+    key k = handleKey k [] s
+    ignore = Continue s Nothing

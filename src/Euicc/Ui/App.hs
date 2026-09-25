@@ -22,10 +22,12 @@ import Brick
     , Widget
     , attrMap
     , attrName
+    , clickable
     , customMain
     , emptyWidget
     , fg
     , get
+    , getVtyHandle
     , hBox
     , hLimit
     , halt
@@ -51,7 +53,7 @@ import Brick.Widgets.Border.Style (unicodeRounded)
 import Brick.Widgets.Center (center, hCenter)
 import Brick.Widgets.Dialog (dialog, dialogAttr, renderDialog)
 import Control.Concurrent (forkIO)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (toLower, toUpper)
 import Data.Foldable (traverse_)
@@ -77,6 +79,7 @@ import Euicc.Lpac.Output
     )
 import Euicc.Ui.State
     ( Browser (..)
+    , Click (..)
     , Field (..)
     , Form (..)
     , State (..)
@@ -89,6 +92,7 @@ import Euicc.Ui.State
     , confirmDisplay
     , deleteCheck
     , finishJob
+    , handleClick
     , handleKey
     , smdpDisplay
     , start
@@ -100,6 +104,14 @@ import System.FilePath (takeExtension)
 
 -- | A job finished on the worker thread.
 newtype AppEvent = JobDone JobResult
+
+-- | The widgets a click can land on.
+data Name
+    = ProfileRow Int
+    | NotificationRow Int
+    | TabOf View
+    | PickerEntry Int
+    deriving stock (Eq, Ord, Show)
 
 -- | Run the UI until the user quits.
 runApp :: LpacRunner -> IO ()
@@ -113,32 +125,57 @@ runApp runner = do
     vty <- buildVty
     void $ customMain vty buildVty (Just chan) (app launch) s0
 
-app :: (Job -> IO ()) -> App State AppEvent ()
+app :: (Job -> IO ()) -> App State AppEvent Name
 app launch =
     App
         { appDraw = draw
         , appChooseCursor = neverShowCursor
         , appHandleEvent = handleEvent launch
-        , appStartEvent = pure ()
+        , appStartEvent = enableMouse
         , appAttrMap = const attributes
         }
 
+-- | Ask the terminal for mouse events, when it can report them.
+enableMouse :: EventM Name State ()
+enableMouse = do
+    output <- V.outputIface <$> getVtyHandle
+    when (V.supportsMode output V.Mouse)
+        $ liftIO
+        $ V.setMode output V.Mouse True
+
 handleEvent
-    :: (Job -> IO ()) -> BrickEvent () AppEvent -> EventM () State ()
+    :: (Job -> IO ()) -> BrickEvent Name AppEvent -> EventM Name State ()
 handleEvent launch = \case
-    VtyEvent (V.EvKey key mods) -> do
-        s <- get
-        case handleKey key mods s of
-            Halt -> halt
-            Continue s' job -> do
-                put s'
-                liftIO $ traverse_ launch job
+    VtyEvent (V.EvKey key mods) -> step $ handleKey key mods
+    MouseDown name button _ _ -> case clickOf name button of
+        Just c -> step $ handleClick c
+        Nothing -> pure ()
     AppEvent (JobDone r) -> do
         s <- get
         let (s', job) = finishJob r s
         put s'
         liftIO $ traverse_ launch job
     _ -> pure ()
+  where
+    step f = do
+        s <- get
+        case f s of
+            Halt -> halt
+            Continue s' job -> do
+                put s'
+                liftIO $ traverse_ launch job
+
+-- | What a mouse button press on a named widget means.
+clickOf :: Name -> V.Button -> Maybe Click
+clickOf name = \case
+    V.BScrollUp -> Just WheelUp
+    V.BScrollDown -> Just WheelDown
+    V.BLeft -> Just $ case name of
+        ProfileRow i -> ClickProfile i
+        NotificationRow i -> ClickNotification i
+        TabOf v -> ClickTab v
+        PickerEntry i -> ClickPicker i
+    _ -> Nothing
 
 -- Attributes -------------------------------------------------------
 
@@ -219,7 +256,7 @@ attributes =
 
 -- Layout -----------------------------------------------------------
 
-draw :: State -> [Widget ()]
+draw :: State -> [Widget Name]
 draw s =
     [ helpLayer s
     , browserLayer s
@@ -229,7 +266,7 @@ draw s =
     , mainLayer s
     ]
 
-mainLayer :: State -> Widget ()
+mainLayer :: State -> Widget Name
 mainLayer s =
     vBox
         [ topBar s
@@ -241,7 +278,7 @@ mainLayer s =
         , bottomLine s
         ]
 
-topBar :: State -> Widget ()
+topBar :: State -> Widget Name
 topBar s =
     withAttr barAttr $
         hBox
@@ -260,14 +297,15 @@ topBar s =
 formatBytes :: Integer -> Text
 formatBytes n = T.pack (show $ n `div` 1024) <> " KiB free"
 
-tabs :: State -> Widget ()
+tabs :: State -> Widget Name
 tabs s =
     padLeftRight 1 $
         hBox
-            [ tab onProfiles " Profiles "
+            [ clickable (TabOf ProfilesView) $ tab onProfiles " Profiles "
             , txt " "
-            , tab (stView s == NotificationsView) $
-                " Notifications"
+            , clickable (TabOf NotificationsView)
+                $ tab (stView s == NotificationsView)
+                $ " Notifications"
                     <> maybe "" (\n -> " (" <> T.pack (show n) <> ")") pending
                     <> " "
             , padLeft Max $ case stView s of
@@ -282,7 +320,7 @@ tabs s =
         _ -> Nothing
     tab active = withAttr (if active then tabActiveAttr else tabAttr) . txt
 
-body :: State -> Widget ()
+body :: State -> Widget Name
 body s = case stCard s of
     Nothing -> center $ withAttr dimAttr $ txt "Reading the card..."
     Just (Left f) ->
@@ -306,7 +344,7 @@ body s = case stCard s of
 -- Tables -----------------------------------------------------------
 
 -- | A table row: fixed-width cells, padded to the full line.
-row :: [(Int, Text)] -> Widget ()
+row :: [(Int, Text)] -> Widget Name
 row cells = padRight Max $ hBox $ map cell cells
   where
     cell (w, t) = hLimit w $ padRight Max $ txt $ fill $ clip w t
@@ -315,7 +353,7 @@ row cells = padRight Max $ hBox $ map cell cells
         | otherwise = T.take (w - 2) t <> "…"
     fill t = if T.null t then " " else t
 
-headerRow :: [(Int, Text)] -> Widget ()
+headerRow :: [(Int, Text)] -> Widget Name
 headerRow = withAttr columnAttr . row
 
 -- | The attribute of a table row: selected, else striped.
@@ -325,7 +363,7 @@ rowAttr selected i
     | odd i = stripeAttr
     | otherwise = plainAttr
 
-profilesTable :: State -> Snapshot -> Widget ()
+profilesTable :: State -> Snapshot -> Widget Name
 profilesTable s snap = case snapProfiles snap of
     [] ->
         center $
@@ -341,9 +379,10 @@ profilesTable s snap = case snapProfiles snap of
                 : zipWith profileRow [0 ..] ps
   where
     widths = [3, 30, 22, 23, 10]
-    profileRow :: Int -> Profile -> Widget ()
+    profileRow :: Int -> Profile -> Widget Name
     profileRow i p =
-        withAttr (rowAttr (i == stProfileCursor s) i)
+        clickable (ProfileRow i)
+            $ withAttr (rowAttr (i == stProfileCursor s) i)
             $ row
             $ zip
                 widths
@@ -359,7 +398,7 @@ profilesTable s snap = case snapProfiles snap of
         Disabled -> "disabled"
         OtherState t -> t
 
-notificationsTable :: State -> Snapshot -> Widget ()
+notificationsTable :: State -> Snapshot -> Widget Name
 notificationsTable s snap = case snapNotifications snap of
     [] ->
         center
@@ -378,9 +417,10 @@ notificationsTable s snap = case snapNotifications snap of
                 <> zipWith notificationRow [0 ..] ns
   where
     widths = [6, 12, 30, 40]
-    notificationRow :: Int -> Notification -> Widget ()
+    notificationRow :: Int -> Notification -> Widget Name
     notificationRow i Notification{..} =
-        withAttr (rowAttr (i == stNotificationCursor s) i)
+        clickable (NotificationRow i)
+            $ withAttr (rowAttr (i == stNotificationCursor s) i)
             $ row
             $ zip
                 widths
@@ -397,10 +437,10 @@ notificationsTable s snap = case snapNotifications snap of
 -- Panels and forms -------------------------------------------------
 
 -- | A titled, rounded box of bounded width.
-panel :: Text -> [Widget ()] -> Widget ()
+panel :: Text -> [Widget Name] -> Widget Name
 panel = panelWith False
 
-panelWith :: Bool -> Text -> [Widget ()] -> Widget ()
+panelWith :: Bool -> Text -> [Widget Name] -> Widget Name
 panelWith danger title contents =
     (if danger then overrideAttr borderAttr dangerBorderAttr else id)
         $ withBorderStyle unicodeRounded
@@ -419,7 +459,7 @@ panelWith danger title contents =
         $ vBox contents
 
 -- | A text input box, with a caret when it has the focus.
-input :: Bool -> Int -> Text -> Widget ()
+input :: Bool -> Int -> Text -> Widget Name
 input focused w value =
     withAttr (if focused then inputFocusAttr else inputAttr)
         $ hLimit w
@@ -428,7 +468,7 @@ input focused w value =
         $ " " <> T.takeEnd (w - 3) value <> (if focused then "▏" else " ")
 
 -- | An input box showing a hint while it is empty.
-inputOr :: Text -> Bool -> Int -> Text -> Widget ()
+inputOr :: Text -> Bool -> Int -> Text -> Widget Name
 inputOr placeholder focused w value
     | T.null value =
         withAttr (if focused then inputFocusAttr else inputAttr)
@@ -439,7 +479,7 @@ inputOr placeholder focused w value
     | otherwise = input focused w value
 
 -- | A labelled form field.
-field :: Bool -> Text -> Widget () -> Widget ()
+field :: Bool -> Text -> Widget Name -> Widget Name
 field focused label widget =
     hBox
         [ withAttr (if focused then focusLabelAttr else dimAttr)
@@ -449,7 +489,7 @@ field focused label widget =
         ]
 
 -- | The source form shared by the download view and the guided install.
-formPanel :: Form -> [Text] -> Widget ()
+formPanel :: Form -> [Text] -> Widget Name
 formPanel form notes =
     panel "Where does the plan come from?" $
         [ field (focused QrField) "QR image         " $
@@ -470,7 +510,7 @@ formPanel form notes =
   where
     focused f = formFocus form == f
 
-wizardBody :: State -> Widget ()
+wizardBody :: State -> Widget Name
 wizardBody s = case wzPhase w of
     WzSource ->
         formPanel
@@ -520,7 +560,7 @@ wizardBody s = case wzPhase w of
 -- Status and help --------------------------------------------------
 
 -- | The status on the left; on the right, how to get help.
-bottomLine :: State -> Widget ()
+bottomLine :: State -> Widget Name
 bottomLine s =
     padLeftRight 1 $
         hBox
@@ -548,7 +588,7 @@ bottomLine s =
         Nothing -> t
 
 -- | Key hints on one line.
-hints :: [(Text, Text)] -> Widget ()
+hints :: [(Text, Text)] -> Widget Name
 hints = hBox . zipWith hint [0 :: Int ..]
   where
     hint i (k, d) =
@@ -605,7 +645,7 @@ keysFor s
             , ("esc", "cancel")
             ]
 
-helpLayer :: State -> Widget ()
+helpLayer :: State -> Widget Name
 helpLayer s
     | not (stHelp s) = emptyWidget
     | otherwise =
@@ -624,7 +664,7 @@ helpLayer s
 
 -- Layers -----------------------------------------------------------
 
-browserLayer :: State -> Widget ()
+browserLayer :: State -> Widget Name
 browserLayer s = case stBrowser s of
     Nothing -> emptyWidget
     Just Browser{..} ->
@@ -649,7 +689,8 @@ browserLayer s = case stBrowser s of
                        ]
   where
     entry selected i (isDir, name) =
-        withAttr (attrFor selected i isDir name)
+        clickable (PickerEntry i)
+            $ withAttr (attrFor selected i isDir name)
             $ padRight Max
             $ txt
             $ (if selected then "› " else "  ")
@@ -666,7 +707,7 @@ browserLayer s = case stBrowser s of
         | length p <= n = p
         | otherwise = "…" <> reverse (take (n - 1) $ reverse p)
 
-confirmLayer :: State -> Widget ()
+confirmLayer :: State -> Widget Name
 confirmLayer s = case stConfirm s of
     Nothing -> emptyWidget
     Just p ->
@@ -687,7 +728,7 @@ confirmLayer s = case stConfirm s of
     enabledProfile =
         find ((== Enabled) . profileState) . snapProfiles =<< snapshotOf s
 
-nicknameLayer :: State -> Widget ()
+nicknameLayer :: State -> Widget Name
 nicknameLayer s = case stNicknameEdit s of
     Nothing -> emptyWidget
     Just (p, t) ->
@@ -702,7 +743,7 @@ nicknameLayer s = case stNicknameEdit s of
                 hints [("enter", "set"), ("empty", "clears"), ("esc", "cancel")]
             ]
 
-deleteLayer :: State -> Widget ()
+deleteLayer :: State -> Widget Name
 deleteLayer s = case stDelete s of
     Nothing -> emptyWidget
     Just (p, t) ->

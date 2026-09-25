@@ -49,6 +49,12 @@ On NixOS, `services.pcscd.enable = true;` provides the daemon.
 
 Press `?` for the keys of the current screen.
 
+The mouse works too: a click selects a row, a tab or a picker entry;
+a click on the selected profile asks to enable it, and on the selected
+picker entry picks it. The wheel moves the selection. Notifications are
+sent, and profiles deleted, only from the keyboard. With mouse mode on,
+most terminals select text with shift+drag.
+
 | View | Keys |
 |---|---|
 | Profiles | up/down (or j/k) select, `e`/enter enable, `m` nickname, `n` notifications, `d` download, `g` guided install, `D` delete, `r` refresh, `q` quit |
