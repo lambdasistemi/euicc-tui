@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               euicc-tui
-version:            0.1.0.0
+version:            0.1.1.0
 synopsis:           Terminal UI for eUICC profile management over lpac
 description:
   A brick terminal UI that drives @lpac@ over PC/SC to list, enable
