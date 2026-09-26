@@ -8,6 +8,10 @@
     haskellNix.url = "github:input-output-hk/haskell.nix";
     nixpkgs.follows = "haskellNix/nixpkgs-unstable";
     flake-utils.url = "github:hamishmack/flake-utils/hkm/nested-hydraJobs";
+    bundlers = {
+      url = "github:NixOS/bundlers";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs =
     {
@@ -15,15 +19,35 @@
       nixpkgs,
       flake-utils,
       haskellNix,
+      bundlers,
       ...
     }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (
       system:
       let
         pkgs = import nixpkgs {
-          overlays = [ haskellNix.overlay ];
+          overlays = [
+            haskellNix.overlay
+            (_: prev: { zbar = import ./nix/zbar.nix { pkgs = prev; }; })
+          ];
           inherit system;
         };
+        packageVersion = builtins.head (
+          builtins.match ".*\nversion:[[:space:]]*([0-9.]+)\n.*" (builtins.readFile ./euicc-tui.cabal)
+        );
+        sourceRevision = self.shortRev or (self.dirtyShortRev or "dirty");
+        linuxRelease =
+          artifactVersion:
+          import ./nix/linux-release.nix {
+            inherit
+              pkgs
+              system
+              packageVersion
+              artifactVersion
+              bundlers
+              ;
+            package = euicc-tui;
+          };
         project = import ./nix/project.nix { inherit pkgs; };
         components = project.hsPkgs.euicc-tui.components;
         euicc-tui = import ./nix/package.nix {
@@ -40,6 +64,10 @@
           default = euicc-tui;
           inherit euicc-tui;
           unit-tests = components.tests.unit-tests;
+          linux-release-artifacts = linuxRelease packageVersion;
+          linux-dev-release-artifacts = linuxRelease "${packageVersion}-${sourceRevision}";
+          linux-artifact-smoke = import ./nix/linux-artifact-smoke.nix { inherit pkgs system; };
+          linux-install-test = import ./nix/linux-install-test.nix { inherit pkgs system; };
         };
         checks = builtins.removeAttrs checks [ "apps" ] // {
           inherit euicc-tui;

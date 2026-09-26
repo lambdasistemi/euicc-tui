@@ -33,17 +33,74 @@ so profiles can be inspected and switched without remembering ICCIDs.
 
 ## Install and run
 
-With Nix (flakes enabled) on a machine where `pcscd` is running:
+Plug the reader in, put the card in, and run `euicc-tui` from a
+terminal in the machine's own desktop session: `pcscd` admits only
+the active local session (see `8010006A` under
+[Error messages](#error-messages)).
+
+### Debian and Ubuntu (amd64)
+
+Download `euicc-tui-<version>-x86_64-linux.deb` from the
+[latest release](https://github.com/lambdasistemi/euicc-tui/releases/latest)
+and install it with `apt`, which also installs `pcscd`, the CCID
+reader driver (`libccid`) and the PC/SC client library:
+
+```sh
+sudo apt install ./euicc-tui-<version>-x86_64-linux.deb
+euicc-tui
+```
+
+`lpac` and `zbar` (QR decoding) are bundled; the distribution's own
+`lpac`, if any, is never used.
+
+### Fedora (x86_64)
+
+Download `euicc-tui-<version>-x86_64-linux.rpm` from the same release
+and install it with `dnf`, which also installs `pcsc-lite`, the CCID
+driver (`pcsc-lite-ccid`) and the PC/SC client library
+(`pcsc-lite-libs`); then start the daemon:
+
+```sh
+sudo dnf install ./euicc-tui-<version>-x86_64-linux.rpm
+sudo systemctl enable --now pcscd.socket
+euicc-tui
+```
+
+### Other distributions (x86_64)
+
+Install `pcscd` and the CCID driver (`ccid` or `libccid`) from the
+distribution and start `pcscd` (usually `systemctl enable --now
+pcscd.socket`), then run the AppImage from the same release:
+
+```sh
+curl -LO https://github.com/lambdasistemi/euicc-tui/releases/latest/download/euicc-tui.AppImage
+chmod +x euicc-tui.AppImage
+./euicc-tui.AppImage
+```
+
+The AppImage mounts its bundled files in a user namespace; Ubuntu
+24.04 and later restrict those for unprivileged programs, so use the
+`.deb` there.
+
+### Nix
+
+With flakes enabled, on a machine where `pcscd` is running:
 
 ```sh
 nix run github:lambdasistemi/euicc-tui
 ```
 
-The package wraps `lpac` and `zbar` (QR decoding) into the program's
-`PATH`, and every `lpac` call runs with `LPAC_APDU=pcsc`, whatever
-the caller's environment says.
-
 On NixOS, `services.pcscd.enable = true;` provides the daemon.
+
+### What the packages bundle
+
+Every package wraps `lpac` and `zbar` into the program's `PATH`, and
+every `lpac` call runs with `LPAC_APDU=pcsc`, whatever the caller's
+environment says. The PC/SC client and `pcscd` must speak the same
+protocol version, so when the distribution ships its own client
+library (`libpcsclite_real.so.1`, or `libpcsclite.so.1` before
+pcsc-lite 2.3), the bundled one hands over to it
+(`LIBPCSCLITE_DELEGATE`); on NixOS the bundled one is used.
 
 ## Keys
 
@@ -105,7 +162,7 @@ Known PC/SC failures are translated:
 
 | lpac says | Meaning |
 |---|---|
-| `8010002E` | No reader visible to `pcscd`. |
+| `8010002E` | No reader visible to `pcscd`: plug the reader in and check that `pcscd` is running. |
 | `8010000C`, `80100069` | Reader present, no card. |
 | `8010006A` | `pcscd`'s polkit policy only admits the active local session: run at the machine's own desk, or via `sudo`. |
 | `LIBUSB_ERROR_ACCESS` | The reader was plugged in before its udev rules applied: re-plug it. |
